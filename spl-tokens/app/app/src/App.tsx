@@ -16,6 +16,7 @@ import {
     GetCommitmentSignature,
     depositAndQueueTransferIx,
     deriveEphemeralAta,
+    deriveRentPda,
     deriveShuttleEphemeralAta,
     deriveShuttleWalletAta,
     deriveTransferQueue,
@@ -23,6 +24,7 @@ import {
     deriveVaultAta,
     delegateTransferQueueIx,
     ensureTransferQueueCrankIx,
+    initRentPdaIx,
     initTransferQueueIx,
     undelegateIx,
     withdrawSplIx, delegateSpl
@@ -879,7 +881,7 @@ const App: React.FC = () => {
                 await conn.confirmTransaction(sig, 'confirmed');
             }
             setTransactionSuccess(`${usePrivateTransfer ? 'Private transfer queued' : 'Transfer confirmed'}: ${sig.substring(0, 10)}...${sig.substring(sig.length - 10, sig.length)}`);
-            console.log("Private transfer: ", sig);
+            console.log("Transfer: ", sig);
             await refreshBalances();
         } catch (e: any) {
             setTransactionError(await formatTransactionError(e, conn));
@@ -913,6 +915,7 @@ const App: React.FC = () => {
             const setupOn = async (conn: Connection) => {
                 const ataPubkeys = accounts.map(a => getAssociatedTokenAddressSync(mintKp.publicKey, a.keypair.publicKey));
                 const [transferQueue] = deriveTransferQueue(mintKp.publicKey);
+                const [rentPda] = deriveRentPda();
 
                 const mintTx = new Transaction().add(
                     SystemProgram.createAccount({
@@ -951,6 +954,15 @@ const App: React.FC = () => {
                         transferQueue,
                         mintKp.publicKey,
                     ),
+                    initRentPdaIx(
+                        payer.publicKey,
+                        rentPda,
+                    ),
+                    SystemProgram.transfer({
+                        fromPubkey: payer.publicKey,
+                        toPubkey: rentPda,
+                        lamports: LAMPORTS_PER_SOL / 10,
+                    }),
                     delegateTransferQueueIx(
                         transferQueue,
                         payer.publicKey,
@@ -1252,7 +1264,7 @@ const App: React.FC = () => {
                                             mint,
                                             shuttleEphemeralAta,
                                         );
-                                        console.log(shuttleWalletAta.toBase58());
+                                        await eConn.getAccountInfo(shuttleWalletAta);
 
                                         await refreshBalances();
                                     } catch (e: any) {
