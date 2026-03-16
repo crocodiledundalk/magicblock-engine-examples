@@ -13,7 +13,6 @@ import {
 } from "@solana/web3.js";
 import {
     DELEGATION_PROGRAM_ID,
-    GetCommitmentSignature,
     depositAndQueueTransferIx,
     deriveEphemeralAta,
     deriveRentPda,
@@ -26,8 +25,7 @@ import {
     ensureTransferQueueCrankIx,
     initRentPdaIx,
     initTransferQueueIx,
-    undelegateIx,
-    withdrawSplIx, delegateSpl
+    withdrawSpl, delegateSpl, deriveShuttleAta
 } from "@magicblock-labs/ephemeral-rollups-sdk";
 
 // Minimal SPL helpers (vendored) to avoid importing "@solana/spl-token" in the browser.
@@ -1314,7 +1312,7 @@ const App: React.FC = () => {
                             />
                             <button
                                 onClick={async () => {
-                                    // Undelegate on Ephemeral first (if delegated), then withdraw on L1, for this specific account
+                                    // Undelegate on Ephemeral first (if delegated), then withdraw on L1 in a single tx for this account
                                     setTransactionError(null);
                                     setTransactionSuccess(null);
                                     const eConn = ephemeralConnection.current;
@@ -1330,25 +1328,14 @@ const App: React.FC = () => {
                                         const amountBn = parseAmount(raw, decimals);
                                         if (amountBn <= 0n) throw new Error('Invalid amount');
 
-                                        if (a.eDelegated) {
-                                            // 1) Send undelegate instruction on Ephemeral rollup
-                                            const ixU = undelegateIx(a.keypair.publicKey, mint);
-                                            const txU = new Transaction().add(createNoopInstruction(), ixU);
-                                            txU.feePayer = a.keypair.publicKey;
-                                            const bhU = await getCachedEphemeralBlockhash();
-                                            txU.recentBlockhash = bhU;
-                                            txU.sign(a.keypair);
-                                            const sigU = await eConn.sendRawTransaction(txU.serialize(), {skipPreflight: true});
-                                            await eConn.confirmTransaction(sigU, 'confirmed');
-
-                                            // Wait for commitment signature, then confirm on L1
-                                            const txCommitSgn = await GetCommitmentSignature(sigU, eConn);
-                                            await connection.confirmTransaction(txCommitSgn, 'confirmed');
-                                        }
-
-                                        // 2) Withdraw on L1 for the requested amount
-                                        const ixW = withdrawSplIx(a.keypair.publicKey, mint, amountBn);
-                                        const txW = new Transaction().add(ixW);
+                                        // Withdraw on base chain for the requested amount
+                                        const shuttleId = crypto.getRandomValues(new Uint32Array(1))[0];
+                                        const ixsW = await withdrawSpl(a.keypair.publicKey, mint, amountBn, {
+                                            idempotent: true,
+                                            validator: validator.current,
+                                            shuttleId
+                                        });
+                                        const txW = new Transaction().add(...ixsW);
                                         txW.feePayer = a.keypair.publicKey;
                                         const { blockhash: bhW } = await connection.getLatestBlockhash({commitment: "finalized"});
                                         txW.recentBlockhash = bhW;
@@ -1357,6 +1344,24 @@ const App: React.FC = () => {
                                         await connection.confirmTransaction(sigW, 'confirmed');
 
                                         setTransactionSuccess('Undelegation and withdraw confirmed');
+                                        console.log("Undelegation: ", sigW);
+
+                                        const [shuttleEphemeralAta] = deriveShuttleEphemeralAta(
+                                            a.keypair.publicKey,
+                                            mint,
+                                            shuttleId,
+                                        );
+                                        const shuttleWalletAta = deriveShuttleWalletAta(
+                                            mint,
+                                            shuttleEphemeralAta,
+                                        );
+                                        const [shuttleAta] = deriveShuttleAta(shuttleEphemeralAta, mint);
+                                        await eConn.getAccountInfo(shuttleAta);
+                                        await eConn.getAccountInfo(shuttleWalletAta);
+                                        await eConn.getAccountInfo(shuttleEphemeralAta);
+                                        console.log(shuttleWalletAta.toBase58());
+                                        console.log(shuttleEphemeralAta.toBase58());
+                                        console.log(shuttleAta.toBase58());
                                         await refreshBalances();
                                     } catch (e: any) {
                                         setTransactionError(await formatTransactionError(e, connection));
