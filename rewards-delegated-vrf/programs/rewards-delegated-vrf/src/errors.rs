@@ -73,4 +73,19 @@ pub enum RewardError {
 
     #[msg("Reward ranges overlap")]
     RewardRangesOverlap,
+
+    #[msg("Mint not found in reward")]
+    MintNotFoundInReward,
+
+    #[msg("Insufficient redemption limit to remove")]
+    InsufficientRedemptionLimit,
+
+    #[msg("Invalid draw range: draw_range_min must be less than or equal to draw_range_max")]
+    InvalidDrawRange,
+
+    #[msg("Invalid redemption state: redemption_count cannot exceed redemption_limit")]
+    InvalidRedemptionState,
+
+    #[msg("Invalid reward amount: must be greater than 0")]
+    InvalidRewardAmount,
 }

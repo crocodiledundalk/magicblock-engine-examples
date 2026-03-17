@@ -24,7 +24,7 @@ pub mod token_detection;
 
 use constants::*;
 use errors::RewardError;
-use helpers::validate_reward_ranges;
+use helpers::validate_reward;
 use state::{Reward, RewardDistributor, RewardType, RewardsList, TransferLookupTable};
 use token_detection::detect_reward_type;
 
@@ -84,7 +84,7 @@ pub mod rewards_delegated_vrf {
         reward_list.global_range_max = global_range_max;
 
         // Validate reward ranges after setting
-        validate_reward_ranges(reward_list)?;
+        validate_reward(reward_list)?;
 
         Ok(())
     }
@@ -852,10 +852,345 @@ pub mod rewards_delegated_vrf {
         }
 
         // Validate reward ranges after adding
-        validate_reward_ranges(reward_list)?;
+        validate_reward(reward_list)?;
 
         Ok(())
     }
+
+    pub fn remove_reward(
+        ctx: Context<RemoveReward>,
+        reward_name: String,
+        mint_to_remove: Pubkey,
+        redemption_amount: Option<u64>,
+    ) -> Result<()> {
+        let reward_distributor = &ctx.accounts.reward_distributor;
+        let reward_list = &mut ctx.accounts.reward_list;
+        let transfer_lookup_table = &ctx.accounts.transfer_lookup_table;
+
+        msg!(
+            "Processing removal of mint {} from reward '{}' in reward list: {:?}",
+            mint_to_remove,
+            reward_name,
+            reward_list.key()
+        );
+
+        // Find the reward by name
+        let reward_index = reward_list
+            .rewards
+            .iter()
+            .position(|r| r.name == reward_name)
+            .ok_or(RewardError::RewardNotFound)?;
+
+        // Store reward details before mutable operations
+        let (reward_type, reward_amount, reward_mints) = {
+            let reward = &reward_list.rewards[reward_index];
+            (
+                reward.reward_type.clone(),
+                reward.reward_amount,
+                reward.reward_mints.clone(),
+            )
+        };
+
+        let mint = mint_to_remove;
+
+        // Handle removal based on reward type
+        {
+            let reward = &mut reward_list.rewards[reward_index];
+            match reward_type {
+                RewardType::LegacyNft | RewardType::ProgrammableNft => {
+                    // For NFT rewards, check if mint exists in reward_mints
+                    let mint_position = reward
+                        .reward_mints
+                        .iter()
+                        .position(|m| *m == mint)
+                        .ok_or(RewardError::MintNotFoundInReward)?;
+
+                    // Remove the mint from the array
+                    reward.reward_mints.remove(mint_position);
+
+                    // Recalculate redemption_limit to the length of the array
+                    reward.redemption_limit = reward.reward_mints.len() as u64;
+
+                    msg!(
+                        "Removed mint {} from NFT reward '{}'. New redemption limit: {}",
+                        mint,
+                        reward_name,
+                        reward.redemption_limit
+                    );
+                }
+                RewardType::SplToken => {
+                    // For SPL tokens, reduce the redemption_limit by the amount
+                    let amount_to_remove =
+                        redemption_amount.ok_or(RewardError::MissingRedemptionLimit)?;
+
+                    if reward.redemption_limit < amount_to_remove {
+                        msg!(
+                            "Token reward '{}' does not have enough redemption limit to remove. Existing limit: {}, Trying to remove: {}",
+                            reward_name,
+                            reward.redemption_limit,
+                            amount_to_remove
+                        );
+                        return Err(RewardError::InsufficientRedemptionLimit.into());
+                    }
+
+                    reward.redemption_limit =
+                        reward.redemption_limit.saturating_sub(amount_to_remove);
+
+                    msg!(
+                        "Removed {} from token reward '{}'. New redemption limit: {}",
+                        amount_to_remove,
+                        reward_name,
+                        reward.redemption_limit
+                    );
+                }
+                _ => {
+                    msg!("Unsupported reward type for removal: {:?}", reward_type);
+                    return Err(RewardError::UnsupportedAssetType.into());
+                }
+            }
+
+            // If reward has no more mints/redemption limit, or redemption_count >= redemption_limit, remove the entire reward
+            if reward.reward_mints.is_empty()
+                || reward.redemption_limit == 0
+                || reward.redemption_count >= reward.redemption_limit
+            {
+                reward_list.rewards.remove(reward_index);
+                msg!(
+                    "Removed entire reward '{}' as it has no more redemption limits",
+                    reward_name
+                );
+            }
+        }
+
+        // Validate reward ranges after removal
+        validate_reward(reward_list)?;
+
+        // Determine amount based on reward type
+        let amount = match reward_type {
+            RewardType::LegacyNft | RewardType::ProgrammableNft => 1,
+            _ => reward_amount,
+        };
+
+        // Get the reward before dropping mutable borrow
+        let reward = reward_list.rewards[reward_index].clone();
+        drop(reward_list); // Explicitly drop the mutable borrow
+
+        // Execute transfer action
+        execute_reward_transfer(
+            &ctx,
+            mint,
+            &reward,
+            amount,
+            ctx.accounts.admin.to_account_info(),
+            ctx.accounts.destination.to_account_info(),
+        )?;
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+fn execute_reward_transfer<'info>(
+    ctx: &Context<'_, '_, '_, '_, RemoveReward<'info>>,
+    mint: Pubkey,
+    reward: &Reward,
+    amount: u64,
+    payer: AccountInfo<'info>,
+    destination: AccountInfo<'info>,
+) -> Result<()> {
+    let reward_distributor = &ctx.accounts.reward_distributor;
+    let transfer_lookup_table = &ctx.accounts.transfer_lookup_table;
+
+    // Derive ruleset from reward
+    let ruleset_pda = reward.additional_pubkeys.first().copied();
+
+    // Derive lookup accounts
+    let token_program = transfer_lookup_table.lookup_accounts[0];
+    let ata_program = transfer_lookup_table.lookup_accounts[1];
+    let system_program = transfer_lookup_table.lookup_accounts[2];
+    let token_metadata_program = transfer_lookup_table.lookup_accounts[3];
+    let sysvar_instructions_program = transfer_lookup_table.lookup_accounts[4];
+    let auth_rule_program = transfer_lookup_table.lookup_accounts[5];
+
+    match reward.reward_type {
+        RewardType::SplToken | RewardType::LegacyNft => {
+            let instruction_data =
+                anchor_lang::InstructionData::data(&crate::instruction::TransferRewardSplToken {
+                    amount,
+                });
+
+            let source_token_address =
+                get_associated_token_address(&reward_distributor.key(), &mint);
+            let destination_token_address = get_associated_token_address(&destination.key(), &mint);
+
+            let action_args = ActionArgs::new(instruction_data);
+            let action_accounts = vec![
+                ShortAccountMeta {
+                    pubkey: token_program,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: source_token_address.key(),
+                    is_writable: true,
+                },
+                ShortAccountMeta {
+                    pubkey: mint,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: destination_token_address,
+                    is_writable: true,
+                },
+                ShortAccountMeta {
+                    pubkey: reward_distributor.key(),
+                    is_writable: true,
+                },
+                ShortAccountMeta {
+                    pubkey: destination.key(),
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: ata_program,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: system_program,
+                    is_writable: false,
+                },
+            ];
+
+            let action = CallHandler {
+                destination_program: crate::ID,
+                accounts: action_accounts,
+                args: action_args,
+                escrow_authority: payer.to_account_info(),
+                compute_units: 200_000,
+            };
+
+            MagicIntentBundleBuilder::new(
+                payer.to_account_info(),
+                ctx.accounts.magic_context.to_account_info(),
+                ctx.accounts.magic_program.to_account_info(),
+            )
+            .commit(&[ctx.accounts.reward_list.to_account_info()])
+            .add_post_commit_actions([action])
+            .build_and_invoke()?;
+        }
+        RewardType::ProgrammableNft => {
+            let instruction_data = anchor_lang::InstructionData::data(
+                &crate::instruction::TransferRewardProgrammableNft { amount },
+            );
+
+            let source_token_address =
+                get_associated_token_address(&reward_distributor.key(), &mint);
+            let destination_token_address = get_associated_token_address(&destination.key(), &mint);
+
+            // Derive Metaplex PDAs
+            let (metadata_pda, _) = mpl_token_metadata::accounts::Metadata::find_pda(&mint);
+            let (edition_pda, _) = mpl_token_metadata::accounts::MasterEdition::find_pda(&mint);
+            let (source_token_record_pda, _) =
+                mpl_token_metadata::accounts::TokenRecord::find_pda(&mint, &source_token_address);
+            let (destination_token_record_pda, _) =
+                mpl_token_metadata::accounts::TokenRecord::find_pda(
+                    &mint,
+                    &destination_token_address,
+                );
+
+            // Get ruleset from passed parameter
+            let auth_rule_pda = ruleset_pda.ok_or(RewardError::InvalidRewardType)?;
+
+            let action_args = ActionArgs::new(instruction_data);
+            let action_accounts = vec![
+                ShortAccountMeta {
+                    pubkey: token_program,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: source_token_address.key(),
+                    is_writable: true,
+                },
+                ShortAccountMeta {
+                    pubkey: mint,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: destination_token_address,
+                    is_writable: true,
+                },
+                ShortAccountMeta {
+                    pubkey: reward_distributor.key(),
+                    is_writable: true,
+                },
+                ShortAccountMeta {
+                    pubkey: destination.key(),
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: ata_program,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: system_program,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: token_metadata_program,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: sysvar_instructions_program,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: auth_rule_program,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: metadata_pda,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: edition_pda,
+                    is_writable: false,
+                },
+                ShortAccountMeta {
+                    pubkey: source_token_record_pda,
+                    is_writable: true,
+                },
+                ShortAccountMeta {
+                    pubkey: destination_token_record_pda,
+                    is_writable: true,
+                },
+                ShortAccountMeta {
+                    pubkey: auth_rule_pda,
+                    is_writable: false,
+                },
+            ];
+
+            let action = CallHandler {
+                destination_program: crate::ID,
+                accounts: action_accounts,
+                args: action_args,
+                escrow_authority: payer.to_account_info(),
+                compute_units: 200_000,
+            };
+
+            MagicIntentBundleBuilder::new(
+                payer.to_account_info(),
+                ctx.accounts.magic_context.to_account_info(),
+                ctx.accounts.magic_program.to_account_info(),
+            )
+            .commit(&[ctx.accounts.reward_list.to_account_info()])
+            .add_post_commit_actions([action])
+            .build_and_invoke()?;
+        }
+        _ => return Err(RewardError::UnsupportedAssetType.into()),
+    }
+
+    Ok(())
 }
 
 // ============================================================================
@@ -925,7 +1260,7 @@ pub struct UndelegateRewardList<'info> {
 
 #[derive(Accounts)]
 pub struct AddReward<'info> {
-    #[account(constraint = admin.key() == reward_distributor.super_admin || reward_distributor.admins.contains(&admin.key()) || reward_distributor.whitelist.contains(&admin.key()))]
+    #[account(constraint = admin.key() == reward_distributor.super_admin || reward_distributor.admins.contains(&admin.key()))]
     pub admin: Signer<'info>,
     pub reward_distributor: Account<'info, RewardDistributor>,
     #[account(mut, seeds = [REWARD_LIST_SEED, reward_distributor.key().as_ref()], bump)]
@@ -937,6 +1272,25 @@ pub struct AddReward<'info> {
     )]
     pub token_account: InterfaceAccount<'info, TokenAccount>,
     pub metadata: Option<Account<'info, MetadataAccount>>,
+}
+
+#[action]
+#[derive(Accounts)]
+pub struct RemoveReward<'info> {
+    #[account(constraint = admin.key() == reward_distributor.super_admin || reward_distributor.admins.contains(&admin.key()))]
+    pub admin: Signer<'info>,
+    pub reward_distributor: Account<'info, RewardDistributor>,
+    #[account(mut, seeds = [REWARD_LIST_SEED, reward_distributor.key().as_ref()], bump)]
+    pub reward_list: Account<'info, RewardsList>,
+    #[account(seeds = [TRANSFER_LOOKUP_TABLE_SEED], bump)]
+    pub transfer_lookup_table: Account<'info, TransferLookupTable>,
+    /// CHECK: destination of the removed reward
+    pub destination: AccountInfo<'info>,
+    /// CHECK: Magic Program
+    pub magic_program: AccountInfo<'info>,
+    /// CHECK: Magic Context
+    #[account(mut)]
+    pub magic_context: AccountInfo<'info>,
 }
 
 /// USER FLOW

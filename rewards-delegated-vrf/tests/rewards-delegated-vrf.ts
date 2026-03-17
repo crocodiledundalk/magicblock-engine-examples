@@ -463,7 +463,7 @@ describe.only("rewards-delegated-vrf", () => {
     }
   });
 
-  it("Set Reward List with rewards", async () => {
+  it.only("Set Reward List with rewards", async () => {
     const rewards: any[] = [
       {
         name: "Gold Prize",
