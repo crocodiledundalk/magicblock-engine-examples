@@ -13,19 +13,19 @@ import {
 } from "@solana/web3.js";
 import {
     DELEGATION_PROGRAM_ID,
-    depositAndQueueTransferIx,
     deriveEphemeralAta,
     deriveRentPda,
     deriveShuttleEphemeralAta,
     deriveShuttleWalletAta,
     deriveTransferQueue,
-    deriveVault,
-    deriveVaultAta,
     delegateTransferQueueIx,
     ensureTransferQueueCrankIx,
     initRentPdaIx,
     initTransferQueueIx,
-    withdrawSpl, delegateSpl, deriveShuttleAta
+    transferSpl,
+    withdrawSpl,
+    delegateSpl,
+    deriveShuttleAta
 } from "@magicblock-labs/ephemeral-rollups-sdk";
 
 // Minimal SPL helpers (vendored) to avoid importing "@solana/spl-token" in the browser.
@@ -74,39 +74,6 @@ function createAssociatedTokenAccountInstruction(
             { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
         ],
         data: Buffer.alloc(0),
-    });
-}
-
-function createTransferInstruction(
-    source: PublicKey,
-    destination: PublicKey,
-    owner: PublicKey,
-    amount: bigint | number,
-    multiSigners: PublicKey[] = [],
-    programId: PublicKey = TOKEN_PROGRAM_ID,
-): TransactionInstruction {
-    const data = Buffer.alloc(9);
-    data[0] = 3; // TokenInstruction::Transfer
-    data.writeBigUInt64LE(BigInt(amount), 1);
-
-    const keys = [
-        { pubkey: source, isSigner: false, isWritable: true },
-        { pubkey: destination, isSigner: false, isWritable: true },
-    ];
-
-    if (multiSigners.length === 0) {
-        keys.push({ pubkey: owner, isSigner: true, isWritable: false });
-    } else {
-        keys.push({ pubkey: owner, isSigner: false, isWritable: false });
-        for (const signer of multiSigners) {
-            keys.push({ pubkey: signer, isSigner: true, isWritable: false });
-        }
-    }
-
-    return new TransactionInstruction({
-        programId,
-        keys,
-        data,
     });
 }
 
@@ -426,8 +393,9 @@ const App: React.FC = () => {
     const [srcIndex, setSrcIndex] = useState(0);
     const [dstIndex, setDstIndex] = useState(1);
     const [amountStr, setAmountStr] = useState('1');
-    const [useEphemeral, setUseEphemeral] = useState(true);
-    const [usePrivateTransfer, setUsePrivateTransfer] = useState(false);
+    const [transferVisibility, setTransferVisibility] = useState<'public' | 'private'>('public');
+    const [fromBalance, setFromBalance] = useState<'base' | 'ephemeral'>('ephemeral');
+    const [toBalance, setToBalance] = useState<'base' | 'ephemeral'>('ephemeral');
     const [privateMinDelayMs, setPrivateMinDelayMs] = useState('0');
     const [privateMaxDelayMs, setPrivateMaxDelayMs] = useState('0');
     const [privateSplitCount, setPrivateSplitCount] = useState('1');
@@ -753,27 +721,65 @@ const App: React.FC = () => {
         setTransactionError(null);
         setTransactionSuccess(null);
         const eConn = ephemeralConnection.current;
+        const usesEphemeralConnection = fromBalance === 'ephemeral';
+        const usesQueuedPrivateTransfer =
+            transferVisibility === 'private' && toBalance === 'base';
         if (!mint) {
             setTransactionError('Mint not initialized. Run Setup first.');
             return;
         }
-        if ((useEphemeral || usePrivateTransfer) && !eConn) return;
+        if ((fromBalance === 'ephemeral' || toBalance === 'ephemeral') && !eConn) return;
         const src = accounts[fromIdx];
         const dst = accounts[toIdx];
         if (!src || !dst) return setTransactionError('Invalid source/destination');
         if (fromIdx === toIdx) return setTransactionError('Source and destination must be different');
-        const conn = usePrivateTransfer ? connection : (useEphemeral ? eConn : connection);
+        const conn = usesEphemeralConnection ? eConn : connection;
         if (!conn) return;
         try {
             setIsSubmitting(true);
-            const srcAta = getAssociatedTokenAddressSync(mint, src.keypair.publicKey, false, TOKEN_PROGRAM_ID);
-            const dstAta = getAssociatedTokenAddressSync(mint, dst.keypair.publicKey, false, TOKEN_PROGRAM_ID);
             const amountBn = parseAmount(amountUi, decimals);
             if (amountBn <= 0n) throw new Error('Invalid amount');
 
-            const ixs: TransactionInstruction[] = [];
+            if (fromBalance === 'base') {
+                await ensureAta(connection, src.keypair.publicKey);
+            } else {
+                if (!eConn) return;
+                await ensureAta(eConn, src.keypair.publicKey);
+            }
 
-            if (usePrivateTransfer) {
+            if (toBalance === 'base') {
+                await ensureAta(connection, dst.keypair.publicKey);
+            } else {
+                if (!eConn) return;
+                await ensureAta(eConn, dst.keypair.publicKey);
+
+                if (!accounts[toIdx].eDelegated) {
+                    const delIxs = await delegateSpl(
+                        dst.keypair.publicKey,
+                        mint,
+                        0n,
+                        {
+                            validator: validator.current,
+                            initIfMissing: true,
+                        }
+                    );
+                    const delTx = new Transaction().add(...delIxs);
+                    delTx.feePayer = dst.keypair.publicKey;
+                    const {blockhash: delBh} = await connection.getLatestBlockhash();
+                    delTx.recentBlockhash = delBh;
+                    delTx.sign(dst.keypair);
+                    const delSig = await connection.sendRawTransaction(delTx.serialize());
+                    await connection.confirmTransaction(delSig, 'confirmed');
+                    const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+                    await delay(2000);
+                    await refreshBalances();
+                }
+            }
+
+            let privateTransfer:
+                | { minDelayMs: bigint; maxDelayMs: bigint; split: number }
+                | undefined;
+            if (usesQueuedPrivateTransfer) {
                 const minDelayMsNumber = Number(privateMinDelayMs);
                 const maxDelayMsNumber = Number(privateMaxDelayMs);
                 const splitCountNumber = Number(privateSplitCount);
@@ -792,75 +798,55 @@ const App: React.FC = () => {
                 if (BigInt(splitCountNumber) > amountBn) {
                     throw new Error('Private split cannot exceed the transfer amount in base units');
                 }
-
-                const [transferQueue] = deriveTransferQueue(mint);
-                const [vault] = deriveVault(mint);
-                const vaultAta = deriveVaultAta(mint, vault);
-                ixs.push(createNoopInstruction());
-                ixs.push(
-                    depositAndQueueTransferIx(
-                        transferQueue,
-                        vault,
-                        mint,
-                        srcAta,
-                        vaultAta,
-                        dstAta,
-                        src.keypair.publicKey,
-                        amountBn,
-                        BigInt(minDelayMsNumber),
-                        BigInt(maxDelayMsNumber),
-                        splitCountNumber,
-                    ),
-                );
-            } else {
-                if (!accounts[fromIdx].eDelegated) {
-                    await ensureAta(conn, src.keypair.publicKey);
-                }
-
-                // If using ephemeral and destination hasn't been delegated/initialized, do it first
-                if (!accounts[toIdx].eDelegated) {
-                    const dstInfo = await conn.getAccountInfo(dstAta);
-                    if (!dstInfo) {
-                        ixs.push(createAssociatedTokenAccountInstruction(src.keypair.publicKey, dstAta, dst.keypair.publicKey, mint));
-                    }
-                    if (useEphemeral) {
-                        const delIxs = await delegateSpl(
-                            dst.keypair.publicKey,
-                            mint,
-                            0n,
-                            {
-                                validator: validator.current,
-                                initIfMissing: true,
-                            }
-                        );
-                        const delTx = new Transaction().add(...delIxs);
-                        delTx.feePayer = dst.keypair.publicKey;
-                        const {blockhash: delBh} = await connection.getLatestBlockhash();
-                        delTx.recentBlockhash = delBh;
-                        delTx.sign(dst.keypair);
-                        const delSig = await connection.sendRawTransaction(delTx.serialize());
-                        await connection.confirmTransaction(delSig, 'confirmed');
-                        const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-                        await delay(2000);
-                        await refreshBalances();
-                    }
-                }
-
-                const ixTransfer = createTransferInstruction(
-                    srcAta,
-                    dstAta,
-                    src.keypair.publicKey,
-                    amountBn,
-                    [],
-                    TOKEN_PROGRAM_ID
-                );
-                // Add noop instruction to make the transaction unique
-                ixs.push(createNoopInstruction());
-                ixs.push(ixTransfer);
+                privateTransfer = {
+                    minDelayMs: BigInt(minDelayMsNumber),
+                    maxDelayMs: BigInt(maxDelayMsNumber),
+                    split: splitCountNumber,
+                };
             }
 
+            const shuttleId = crypto.getRandomValues(new Uint32Array(1))[0];
+            const transferIxs = await transferSpl(
+                src.keypair.publicKey,
+                dst.keypair.publicKey,
+                mint,
+                amountBn,
+                {
+                    visibility: transferVisibility,
+                    fromBalance,
+                    toBalance,
+                    payer: src.keypair.publicKey,
+                    validator: validator.current,
+                    privateTransfer,
+                    shuttleId
+                },
+            );
+
+            const [shuttleEphemeralAta] = deriveShuttleEphemeralAta(
+                src.keypair.publicKey,
+                mint,
+                shuttleId,
+            );
+            const shuttleWalletAta = deriveShuttleWalletAta(
+                mint,
+                shuttleEphemeralAta,
+            );
+            // User ATAs
+            const srcAta = getAssociatedTokenAddressSync(
+                mint,
+                src.keypair.publicKey
+            );
+            console.log("Shuttle wallet ata: ", shuttleWalletAta.toBase58());
+            console.log("Shuttle eata: ", shuttleEphemeralAta.toBase58());
+            console.log("Src ata: ", srcAta.toBase58());
+
+            const ixs: TransactionInstruction[] = [
+                createNoopInstruction(),
+                ...transferIxs,
+            ];
+
             let sig;
-            if (usePrivateTransfer || useEphemeral) {
+            if (usesEphemeralConnection) {
                 if (!ephemeralConnection.current) return;
                 const eTx = new anchor.web3.Transaction().add(...ixs);
                 eTx.feePayer = src.keypair.publicKey;
@@ -878,15 +864,16 @@ const App: React.FC = () => {
                 sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: true });
                 await conn.confirmTransaction(sig, 'confirmed');
             }
-            setTransactionSuccess(`${usePrivateTransfer ? 'Private transfer queued' : 'Transfer confirmed'}: ${sig.substring(0, 10)}...${sig.substring(sig.length - 10, sig.length)}`);
+            setTransactionSuccess(`${usesQueuedPrivateTransfer ? 'Private transfer queued' : 'Transfer confirmed'}: ${sig.substring(0, 10)}...${sig.substring(sig.length - 10, sig.length)}`);
             console.log("Transfer: ", sig);
+            await ephemeralConnection!.current!.getAccountInfo(shuttleWalletAta);
             await refreshBalances();
         } catch (e: any) {
             setTransactionError(await formatTransactionError(e, conn));
         } finally {
             setIsSubmitting(false);
         }
-    }, [accounts, connection, decimals, ensureAta, getCachedEphemeralBlockhash, mint, privateMaxDelayMs, privateMinDelayMs, privateSplitCount, refreshBalances, useEphemeral, usePrivateTransfer]);
+    }, [accounts, connection, decimals, ensureAta, fromBalance, getCachedEphemeralBlockhash, mint, privateMaxDelayMs, privateMinDelayMs, privateSplitCount, refreshBalances, toBalance, transferVisibility]);
 
     const handleTransfer = useCallback(async () => {
         await performTransfer(srcIndex, dstIndex, amountStr);
@@ -1264,6 +1251,9 @@ const App: React.FC = () => {
                                         );
                                         await eConn.getAccountInfo(shuttleWalletAta);
 
+                                        console.log("Shuttle wallet ata: ", shuttleWalletAta.toBase58());
+                                        console.log("Shuttle eata: ", shuttleEphemeralAta.toBase58());
+
                                         await refreshBalances();
                                     } catch (e: any) {
                                         setTransactionError(await formatTransactionError(e, connection));
@@ -1359,9 +1349,9 @@ const App: React.FC = () => {
                                         await eConn.getAccountInfo(shuttleAta);
                                         await eConn.getAccountInfo(shuttleWalletAta);
                                         await eConn.getAccountInfo(shuttleEphemeralAta);
-                                        console.log(shuttleWalletAta.toBase58());
-                                        console.log(shuttleEphemeralAta.toBase58());
-                                        console.log(shuttleAta.toBase58());
+                                        console.log("Shuttle wallet ata: ", shuttleWalletAta.toBase58());
+                                        console.log("Shuttle eata: ", shuttleEphemeralAta.toBase58());
+                                        console.log("Shuttle ata: ", shuttleAta.toBase58());
                                         await refreshBalances();
                                     } catch (e: any) {
                                         setTransactionError(await formatTransactionError(e, connection));
@@ -1436,35 +1426,40 @@ const App: React.FC = () => {
                                     />
                                 </label>
 
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#9ca3af', fontSize: 12 }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={usePrivateTransfer}
-                                        onChange={e => {
-                                            const checked = e.target.checked;
-                                            setUsePrivateTransfer(checked);
-                                            if (checked) {
-                                                setUseEphemeral(true);
-                                            }
-                                        }}
-                                    />
-                                    Private
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12 }}>
+                                    Visibility
+                                    <select
+                                        value={transferVisibility}
+                                        onChange={e => setTransferVisibility(e.target.value as 'public' | 'private')}
+                                        style={{ ...INPUT_STYLE, width: 112, padding: '6px 8px' }}
+                                    >
+                                        <option value="public">Public</option>
+                                        <option value="private">Private</option>
+                                    </select>
                                 </label>
 
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#9ca3af', fontSize: 12, opacity: usePrivateTransfer ? 0.5 : 1 }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={useEphemeral}
-                                        disabled={usePrivateTransfer}
-                                        onChange={e => {
-                                            const checked = e.target.checked;
-                                            setUseEphemeral(checked);
-                                            if (!checked) {
-                                                setUsePrivateTransfer(false);
-                                            }
-                                        }}
-                                    />
-                                    Ephemeral
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12 }}>
+                                    From
+                                    <select
+                                        value={fromBalance}
+                                        onChange={e => setFromBalance(e.target.value as 'base' | 'ephemeral')}
+                                        style={{ ...INPUT_STYLE, width: 124, padding: '6px 8px' }}
+                                    >
+                                        <option value="base">Base</option>
+                                        <option value="ephemeral">Ephemeral</option>
+                                    </select>
+                                </label>
+
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12 }}>
+                                    To
+                                    <select
+                                        value={toBalance}
+                                        onChange={e => setToBalance(e.target.value as 'base' | 'ephemeral')}
+                                        style={{ ...INPUT_STYLE, width: 124, padding: '6px 8px' }}
+                                    >
+                                        <option value="base">Base</option>
+                                        <option value="ephemeral">Ephemeral</option>
+                                    </select>
                                 </label>
 
                                 <button
@@ -1472,45 +1467,47 @@ const App: React.FC = () => {
                                     disabled={isSubmitting || !mint}
                                     style={{ ...BUTTON_STYLE, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}
                                 >
-                                    {isSubmitting ? (usePrivateTransfer ? 'Queueing…' : 'Transferring…') : (usePrivateTransfer ? 'Queue Transfer' : 'Transfer')}
+                                    {isSubmitting
+                                        ? (transferVisibility === 'private' && toBalance === 'base' ? 'Queueing…' : 'Transferring…')
+                                        : (transferVisibility === 'private' && toBalance === 'base' ? 'Queue Transfer' : 'Transfer')}
                                 </button>
                             </div>
 
                             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12, opacity: usePrivateTransfer ? 1 : 0.5 }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12, opacity: transferVisibility === 'private' && toBalance === 'base' ? 1 : 0.5 }}>
                                     Min Delay (ms)
                                     <input
                                         type="number"
                                         min="0"
                                         step={1}
                                         value={privateMinDelayMs}
-                                        disabled={!usePrivateTransfer}
+                                        disabled={!(transferVisibility === 'private' && toBalance === 'base')}
                                         onChange={e => setPrivateMinDelayMs(e.target.value)}
                                         style={{ ...INPUT_STYLE, width: 112, padding: '6px 8px' }}
                                     />
                                 </label>
 
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12, opacity: usePrivateTransfer ? 1 : 0.5 }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12, opacity: transferVisibility === 'private' && toBalance === 'base' ? 1 : 0.5 }}>
                                     Max Delay (ms)
                                     <input
                                         type="number"
                                         min="0"
                                         step={1}
                                         value={privateMaxDelayMs}
-                                        disabled={!usePrivateTransfer}
+                                        disabled={!(transferVisibility === 'private' && toBalance === 'base')}
                                         onChange={e => setPrivateMaxDelayMs(e.target.value)}
                                         style={{ ...INPUT_STYLE, width: 96, padding: '6px 8px' }}
                                     />
                                 </label>
 
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12, opacity: usePrivateTransfer ? 1 : 0.5 }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12, opacity: transferVisibility === 'private' && toBalance === 'base' ? 1 : 0.5 }}>
                                     Split
                                     <input
                                         type="number"
                                         min="1"
                                         step={1}
                                         value={privateSplitCount}
-                                        disabled={!usePrivateTransfer}
+                                        disabled={!(transferVisibility === 'private' && toBalance === 'base')}
                                         onChange={e => setPrivateSplitCount(e.target.value)}
                                         style={{ ...INPUT_STYLE, width: 80, padding: '6px 8px' }}
                                     />
