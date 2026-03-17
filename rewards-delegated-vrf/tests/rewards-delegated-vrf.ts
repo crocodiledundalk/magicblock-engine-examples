@@ -57,7 +57,7 @@ describe.only("rewards-delegated-vrf", () => {
   const rewardListPda = PDAs.getRewardList(program.programId, rewardDistributorPda);
   const transferLookupTable = PDAs.getTransferLookupTable(program.programId);
 
-  const whitelist = [wallet.publicKey, new PublicKey("Fr33vGLZtpuLJ6WVezhMQarEPityiwkqsnDANr4aTF8Q")];
+  const whitelist = [wallet.publicKey, new PublicKey("MBRsimXx8nMHvXYgRHLQeVQR3FDALK2eZeXfQ3fJeSv")];
 
   // Initialize pubkeys
   let tokenMint: PublicKey = TOKEN_MINT;
@@ -466,19 +466,19 @@ describe.only("rewards-delegated-vrf", () => {
 it("Set Reward List with rewards", async () => {
     const rewards: any[] = [
       {
-        name: "Gold Prize",
+        name: "10,000 USDC",
         drawRangeMin: 1,
-        drawRangeMax: 30,
+        drawRangeMax: 50,
         rewardType: { splToken: {} },
         rewardMints: [tokenMint],
-        rewardAmount: new anchor.BN(1000),
+        rewardAmount: new anchor.BN(10),
         redemptionCount: new anchor.BN(0),
         redemptionLimit: new anchor.BN(1000),
         additionalPubkeys: [],
       },
       {
-        name: "Silver Prize",
-        drawRangeMin: 31,
+        name: "Magic Ticket",
+        drawRangeMin: 51,
         drawRangeMax: 65,
         rewardType: { splToken: {} },
         rewardMints: [tokenMint],
@@ -712,60 +712,6 @@ it("Set Reward List with rewards", async () => {
 
       // Wait for the callback (with timeout)
       await callbackReceived;
-    }
-  });
-
-  it("Verify reward constraint - super_admin can set reward list", async () => {
-    const rewards = [
-      {
-        name: "Gold Prize",
-        drawRangeMin: 1,
-        drawRangeMax: 30,
-        rewardType: { splToken: {} },
-        rewardMints: [tokenMint],
-        rewardAmount: new anchor.BN(1000),
-        redemptionCount: new anchor.BN(0),
-        redemptionLimit: new anchor.BN(1000),
-        additionalPubkeys: []
-      },
-      {
-        name: "Silver Prize",
-        drawRangeMin: 31,
-        drawRangeMax: 65,
-        rewardType: { legacyNft: {} },
-        rewardMints: [],
-        rewardAmount: new anchor.BN(1),
-        redemptionCount: new anchor.BN(0),
-        redemptionLimit: new anchor.BN(0),
-        additionalPubkeys: []
-      }
-    ];
-
-    const startTimestamp = Math.floor(Date.now() / 1000);
-    const endTimestamp = startTimestamp + 86400;
-
-    const tx = await ephemeralProgram.methods
-      .setRewardList(
-        rewards,
-        new anchor.BN(startTimestamp),
-        new anchor.BN(endTimestamp),
-        1,
-        100
-      )
-      .accounts({
-        admin: wallet.publicKey,
-        rewardDistributor: rewardDistributorPda,
-        rewardList: rewardListPda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .rpc({ skipPreflight: true })
-      .catch((err) => {
-        console.log("Error setting reward list:", err.message);
-        return null;
-      });
-
-    if (tx) {
-      console.log("Reward List set txHash: ", tx);
     }
   });
 
