@@ -206,293 +206,81 @@ pub mod rewards_delegated_vrf {
     ) -> Result<()> {
         let reward_distributor = &ctx.accounts.reward_distributor;
         let user = &ctx.accounts.user;
-        let reward_list = &mut ctx.accounts.reward_list;
         let transfer_lookup_table = &ctx.accounts.transfer_lookup_table;
-        let rnd_u32 = ephemeral_vrf_sdk::rnd::random_u32(&randomness);
-        let range = (reward_list.global_range_max as u64)
-            .checked_sub(reward_list.global_range_min as u64)
-            .unwrap()
-            + 1;
-        let result = reward_list.global_range_min + (rnd_u32 % range as u32);
-        msg!("Random result: {:?} for user: {:?}", result, user.key());
 
-        let mut found_reward = false;
-        for reward in reward_list.rewards.iter_mut() {
-            if result >= reward.draw_range_min && result <= reward.draw_range_max {
-                found_reward = true;
-                if reward.redemption_count < reward.redemption_limit {
-                    reward.redemption_count = reward.redemption_count.saturating_add(1);
-                    msg!(
-                        "Won reward '{}' (range {}-{})",
-                        reward.name,
-                        reward.draw_range_min,
-                        reward.draw_range_max
-                    );
+        {
+            let reward_list = &mut ctx.accounts.reward_list;
+            let rnd_u32 = ephemeral_vrf_sdk::rnd::random_u32(&randomness);
+            let range = (reward_list.global_range_max as u64)
+                .checked_sub(reward_list.global_range_min as u64)
+                .unwrap()
+                + 1;
+            let result = reward_list.global_range_min + (rnd_u32 % range as u32);
+            msg!("Random result: {:?} for user: {:?}", result, user.key());
 
-                    // Use the lookup accounts directly
-                    if !transfer_lookup_table.lookup_accounts.is_empty() {
-                        msg!("Transfer Lookup Accounts for {:?}:", reward.reward_type);
+            let mut found_reward = false;
+            for reward in reward_list.rewards.iter_mut() {
+                if result >= reward.draw_range_min && result <= reward.draw_range_max {
+                    found_reward = true;
+                    if reward.redemption_count < reward.redemption_limit {
+                        reward.redemption_count = reward.redemption_count.saturating_add(1);
                         msg!(
-                            "Account count: {}",
-                            transfer_lookup_table.lookup_accounts.len()
+                            "Won reward '{}' (range {}-{})",
+                            reward.name,
+                            reward.draw_range_min,
+                            reward.draw_range_max
                         );
-                        for (index, account) in
-                            transfer_lookup_table.lookup_accounts.iter().enumerate()
-                        {
-                            msg!("  {}. {}", index + 1, account);
+
+                        // Use the lookup accounts directly
+                        if !transfer_lookup_table.lookup_accounts.is_empty() {
+                            msg!("Transfer Lookup Accounts for {:?}:", reward.reward_type);
+                            msg!(
+                                "Account count: {}",
+                                transfer_lookup_table.lookup_accounts.len()
+                            );
+                            for (index, account) in
+                                transfer_lookup_table.lookup_accounts.iter().enumerate()
+                            {
+                                msg!("  {}. {}", index + 1, account);
+                            }
+                            let mint = reward.reward_mints[0];
+                            let amount = reward.reward_amount;
+                            let reward_clone = reward.clone();
+
+                            execute_reward_transfer(
+                                reward_distributor,
+                                transfer_lookup_table,
+                                &ctx.accounts.reward_list.to_account_info(),
+                                &ctx.accounts.magic_context.to_account_info(),
+                                &ctx.accounts.magic_program.to_account_info(),
+                                mint,
+                                &reward_clone,
+                                amount,
+                                ctx.accounts.vrf_program_identity.to_account_info(),
+                                user.clone(),
+                            )?;
+                            break;
+                        } else {
+                            msg!(
+                                "Warning: No lookup accounts found for reward type {:?}",
+                                reward.reward_type
+                            );
                         }
-                        let mint = reward.reward_mints[0];
-                        let token_program = transfer_lookup_table.lookup_accounts[0]; // Token Program
-                        let ata_program = transfer_lookup_table.lookup_accounts[1]; // ATA Program
-                        let system_program = transfer_lookup_table.lookup_accounts[2]; // System Program
-                        let token_metadata_program = transfer_lookup_table.lookup_accounts[3]; // Token Metadata Program
-                        let sysvar_instructions_program = transfer_lookup_table.lookup_accounts[4]; // Sysvar Instructions Program
-                        let auth_rule_program = transfer_lookup_table.lookup_accounts[5]; // Authorization Rule Program
-
-                        // Handle different reward types
-                        match reward.reward_type {
-                            RewardType::SplToken | RewardType::LegacyNft => {
-                                // SPL TOKEN / LEGACY NFT: COMMIT AND ACTION
-                                // LegacyNft-specific: remove the mint from the reward mints
-                                if reward.reward_type == RewardType::LegacyNft {
-                                    reward.reward_mints.retain(|m| m != &mint);
-                                }
-                                // Create action instruction
-                                let instruction_data = anchor_lang::InstructionData::data(
-                                    &crate::instruction::TransferRewardSplToken {
-                                        amount: reward.reward_amount,
-                                    },
-                                );
-                                // Calculate the associated token account address for source (Reward Distributor)
-                                let source_token_address = get_associated_token_address(
-                                    &reward_distributor.key(), // owner
-                                    &mint,                     // mint
-                                );
-                                // Calculate the associated token account address for destination
-                                let destination_token_address = get_associated_token_address(
-                                    &user.key(), // owner
-                                    &mint,       // mint
-                                );
-
-                                let action_args = ActionArgs::new(instruction_data);
-                                let action_accounts = vec![
-                                    ShortAccountMeta {
-                                        pubkey: token_program, // Token Program
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: source_token_address.key(), // Sender Token Account
-                                        is_writable: true,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: mint, // Mint
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: destination_token_address, // Destination Token Account
-                                        is_writable: true,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: reward_distributor.key(), // Owner of Sender Token Account (Reward Distributor) & Fee Payer Signer
-                                        is_writable: true,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: user.key(), // destination
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: ata_program, // Associated Token Program
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: system_program, // System Program
-                                        is_writable: false,
-                                    },
-                                ];
-                                let action = CallHandler {
-                                    destination_program: crate::ID,
-                                    accounts: action_accounts,
-                                    args: action_args,
-                                    escrow_authority: ctx
-                                        .accounts
-                                        .vrf_program_identity
-                                        .to_account_info(), // Signer authorized to pay transaction fees for action from escrow PDA
-                                    compute_units: 200_000,
-                                };
-
-                                // let (magic_action_account_infos, magic_action_instruction) =
-                                MagicIntentBundleBuilder::new(
-                                    ctx.accounts.vrf_program_identity.to_account_info(), // Signer and fee payer for the entire bundle
-                                    ctx.accounts.magic_context.to_account_info(),
-                                    ctx.accounts.magic_program.to_account_info(),
-                                )
-                                .commit(&[ctx.accounts.reward_list.to_account_info()]) // Commit the updated reward list state
-                                .add_post_commit_actions([action])
-                                .build_and_invoke()?;
-                            }
-                            RewardType::ProgrammableNft => {
-                                // ProgrammableNFT TOKEN: COMMIT AND ACTION
-                                reward.reward_mints.retain(|m| m != &mint);
-                                // Create action instruction
-                                let instruction_data = anchor_lang::InstructionData::data(
-                                    &crate::instruction::TransferRewardSplToken {
-                                        amount: reward.reward_amount,
-                                    },
-                                );
-                                // Calculate the associated token account address for source (Reward Distributor)
-                                let source_token_address = get_associated_token_address(
-                                    &reward_distributor.key(), // owner
-                                    &mint,                     // mint
-                                );
-                                // Calculate the associated token account address for destination
-                                let destination_token_address = get_associated_token_address(
-                                    &user.key(), // owner
-                                    &mint,       // mint
-                                );
-
-                                // Derive Metaplex PDAs for Programmable NFT
-                                let (metadata_pda, _) =
-                                    mpl_token_metadata::accounts::Metadata::find_pda(&mint);
-
-                                let (edition_pda, _) =
-                                    mpl_token_metadata::accounts::MasterEdition::find_pda(&mint);
-
-                                let (source_token_record_pda, _) =
-                                    mpl_token_metadata::accounts::TokenRecord::find_pda(
-                                        &mint,
-                                        &source_token_address,
-                                    );
-                                let (destination_token_record_pda, _) =
-                                    mpl_token_metadata::accounts::TokenRecord::find_pda(
-                                        &mint,
-                                        &destination_token_address,
-                                    );
-
-                                // Extract rule set pubkey from additional_pubkey
-                                let auth_rule_pda = reward
-                                    .additional_pubkeys
-                                    .first()
-                                    .copied()
-                                    .ok_or(RewardError::InvalidRewardType)?;
-
-                                let action_args = ActionArgs::new(instruction_data);
-                                let action_accounts = vec![
-                                    ShortAccountMeta {
-                                        pubkey: token_program, // Token Program
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: source_token_address.key(), // Sender Token Account
-                                        is_writable: true,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: mint, // Mint
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: destination_token_address, // Destination Token Account
-                                        is_writable: true,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: reward_distributor.key(), // Owner of Sender Token Account (Reward Distributor) & Fee Payer Signer
-                                        is_writable: true,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: user.key(), // destination
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: ata_program, // Associated Token Program
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: system_program, // System Program
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: token_metadata_program, // Token Metadata Program
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: sysvar_instructions_program, // Sysvar Instructions Program
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: auth_rule_program, // Authorization Rule Program
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: metadata_pda, // Metadata PDA
-                                        is_writable: true,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: edition_pda, // Edition PDA
-                                        is_writable: false,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: source_token_record_pda, // Source Token Record PDA
-                                        is_writable: true,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: destination_token_record_pda, // Destination Token Record PDA
-                                        is_writable: true,
-                                    },
-                                    ShortAccountMeta {
-                                        pubkey: auth_rule_pda, // Auth Rules PDA
-                                        is_writable: false,
-                                    },
-                                ];
-                                let action = CallHandler {
-                                    destination_program: crate::ID,
-                                    accounts: action_accounts,
-                                    args: action_args,
-                                    escrow_authority: ctx
-                                        .accounts
-                                        .vrf_program_identity
-                                        .to_account_info(), // Signer authorized to pay transaction fees for action from escrow PDA
-                                    compute_units: 200_000,
-                                };
-
-                                // let (magic_action_account_infos, magic_action_instruction) =
-                                MagicIntentBundleBuilder::new(
-                                    ctx.accounts.vrf_program_identity.to_account_info(), // Signer and fee payer for the entire bundle
-                                    ctx.accounts.magic_context.to_account_info(),
-                                    ctx.accounts.magic_program.to_account_info(),
-                                )
-                                .commit(&[ctx.accounts.reward_list.to_account_info()]) // Commit the updated reward list state
-                                .add_post_commit_actions([action])
-                                .build_and_invoke()?;
-                            }
-                            RewardType::SplToken2022 => {
-                                // TODO: Implement SPL Token 2022 transfer
-                                msg!("SPL Token 2022 transfer not yet implemented");
-                            }
-                            RewardType::CompressedNft => {
-                                // TODO: Implement Compressed NFT transfer
-                                msg!("Compressed NFT transfer not yet implemented");
-                            }
-                        }
-                        break;
                     } else {
                         msg!(
-                            "Warning: No lookup accounts found for reward type {:?}",
-                            reward.reward_type
+                            "Reward '{}' is exhausted ({}/{})",
+                            reward.name,
+                            reward.redemption_count,
+                            reward.redemption_limit
                         );
                     }
-                } else {
-                    msg!(
-                        "Reward '{}' is exhausted ({}/{})",
-                        reward.name,
-                        reward.redemption_count,
-                        reward.redemption_limit
-                    );
+                    break;
                 }
-                break;
             }
-        }
 
-        if !found_reward {
-            msg!("No reward found for result: {:?}", result);
+            if !found_reward {
+                msg!("No reward found for result: {:?}", result);
+            }
         }
 
         Ok(())
@@ -863,40 +651,28 @@ pub mod rewards_delegated_vrf {
         mint_to_remove: Pubkey,
         redemption_amount: Option<u64>,
     ) -> Result<()> {
-        let reward_distributor = &ctx.accounts.reward_distributor;
-        let reward_list = &mut ctx.accounts.reward_list;
-        let transfer_lookup_table = &ctx.accounts.transfer_lookup_table;
+        let reward_for_transfer = {
+            let reward_list = &mut ctx.accounts.reward_list;
 
-        msg!(
-            "Processing removal of mint {} from reward '{}' in reward list: {:?}",
-            mint_to_remove,
-            reward_name,
-            reward_list.key()
-        );
+            msg!(
+                "Processing removal of mint {} from reward '{}' in reward list: {:?}",
+                mint_to_remove,
+                reward_name,
+                reward_list.key()
+            );
 
-        // Find the reward by name
-        let reward_index = reward_list
-            .rewards
-            .iter()
-            .position(|r| r.name == reward_name)
-            .ok_or(RewardError::RewardNotFound)?;
+            // Find the reward by name
+            let reward_index = reward_list
+                .rewards
+                .iter()
+                .position(|r| r.name == reward_name)
+                .ok_or(RewardError::RewardNotFound)?;
 
-        // Store reward details before mutable operations
-        let (reward_type, reward_amount, reward_mints) = {
-            let reward = &reward_list.rewards[reward_index];
-            (
-                reward.reward_type.clone(),
-                reward.reward_amount,
-                reward.reward_mints.clone(),
-            )
-        };
+            let mint = mint_to_remove;
 
-        let mint = mint_to_remove;
-
-        // Handle removal based on reward type
-        {
+            // Handle removal based on reward type
             let reward = &mut reward_list.rewards[reward_index];
-            match reward_type {
+            match reward.reward_type {
                 RewardType::LegacyNft | RewardType::ProgrammableNft => {
                     // For NFT rewards, check if mint exists in reward_mints
                     let mint_position = reward
@@ -925,11 +701,11 @@ pub mod rewards_delegated_vrf {
 
                     if reward.redemption_limit < amount_to_remove {
                         msg!(
-                            "Token reward '{}' does not have enough redemption limit to remove. Existing limit: {}, Trying to remove: {}",
-                            reward_name,
-                            reward.redemption_limit,
-                            amount_to_remove
-                        );
+                                "Token reward '{}' does not have enough redemption limit to remove. Existing limit: {}, Trying to remove: {}",
+                                reward_name,
+                                reward.redemption_limit,
+                                amount_to_remove
+                            );
                         return Err(RewardError::InsufficientRedemptionLimit.into());
                     }
 
@@ -944,42 +720,35 @@ pub mod rewards_delegated_vrf {
                     );
                 }
                 _ => {
-                    msg!("Unsupported reward type for removal: {:?}", reward_type);
+                    msg!(
+                        "Unsupported reward type for removal: {:?}",
+                        reward.reward_type
+                    );
                     return Err(RewardError::UnsupportedAssetType.into());
                 }
             }
 
-            // If reward has no more mints/redemption limit, or redemption_count >= redemption_limit, remove the entire reward
-            if reward.reward_mints.is_empty()
-                || reward.redemption_limit == 0
-                || reward.redemption_count >= reward.redemption_limit
-            {
-                reward_list.rewards.remove(reward_index);
-                msg!(
-                    "Removed entire reward '{}' as it has no more redemption limits",
-                    reward_name
-                );
-            }
-        }
-
-        // Validate reward ranges after removal
-        validate_reward(reward_list)?;
-
-        // Determine amount based on reward type
-        let amount = match reward_type {
-            RewardType::LegacyNft | RewardType::ProgrammableNft => 1,
-            _ => reward_amount,
+            reward.clone()
         };
 
-        // Get the reward before dropping mutable borrow
-        let reward = reward_list.rewards[reward_index].clone();
-        drop(reward_list); // Explicitly drop the mutable borrow
+        // Validate reward ranges after removal (outside the mutable borrow scope)
+        validate_reward(&ctx.accounts.reward_list)?;
+
+        // Determine amount based on reward type
+        let amount = match reward_for_transfer.reward_type {
+            RewardType::LegacyNft | RewardType::ProgrammableNft => 1,
+            _ => reward_for_transfer.reward_amount,
+        };
 
         // Execute transfer action
         execute_reward_transfer(
-            &ctx,
-            mint,
-            &reward,
+            &ctx.accounts.reward_distributor,
+            &ctx.accounts.transfer_lookup_table,
+            &ctx.accounts.reward_list.to_account_info(),
+            &ctx.accounts.magic_context.to_account_info(),
+            &ctx.accounts.magic_program.to_account_info(),
+            mint_to_remove,
+            &reward_for_transfer,
             amount,
             ctx.accounts.admin.to_account_info(),
             ctx.accounts.destination.to_account_info(),
@@ -994,16 +763,17 @@ pub mod rewards_delegated_vrf {
 // ============================================================================
 
 fn execute_reward_transfer<'info>(
-    ctx: &Context<'_, '_, '_, '_, RemoveReward<'info>>,
+    reward_distributor: &Account<'info, RewardDistributor>,
+    transfer_lookup_table: &Account<'info, TransferLookupTable>,
+    reward_list: &AccountInfo<'info>,
+    magic_context: &AccountInfo<'info>,
+    magic_program: &AccountInfo<'info>,
     mint: Pubkey,
     reward: &Reward,
     amount: u64,
     payer: AccountInfo<'info>,
     destination: AccountInfo<'info>,
 ) -> Result<()> {
-    let reward_distributor = &ctx.accounts.reward_distributor;
-    let transfer_lookup_table = &ctx.accounts.transfer_lookup_table;
-
     // Derive ruleset from reward
     let ruleset_pda = reward.additional_pubkeys.first().copied();
 
@@ -1072,10 +842,10 @@ fn execute_reward_transfer<'info>(
 
             MagicIntentBundleBuilder::new(
                 payer.to_account_info(),
-                ctx.accounts.magic_context.to_account_info(),
-                ctx.accounts.magic_program.to_account_info(),
+                magic_context.to_account_info(),
+                magic_program.to_account_info(),
             )
-            .commit(&[ctx.accounts.reward_list.to_account_info()])
+            .commit(&[reward_list.to_account_info()])
             .add_post_commit_actions([action])
             .build_and_invoke()?;
         }
@@ -1180,10 +950,10 @@ fn execute_reward_transfer<'info>(
 
             MagicIntentBundleBuilder::new(
                 payer.to_account_info(),
-                ctx.accounts.magic_context.to_account_info(),
-                ctx.accounts.magic_program.to_account_info(),
+                magic_context.to_account_info(),
+                magic_program.to_account_info(),
             )
-            .commit(&[ctx.accounts.reward_list.to_account_info()])
+            .commit(&[reward_list.to_account_info()])
             .add_post_commit_actions([action])
             .build_and_invoke()?;
         }

@@ -463,7 +463,7 @@ describe.only("rewards-delegated-vrf", () => {
     }
   });
 
-  it.only("Set Reward List with rewards", async () => {
+  it("Set Reward List with rewards", async () => {
     const rewards: any[] = [
       {
         name: "Gold Prize",
@@ -641,7 +641,7 @@ describe.only("rewards-delegated-vrf", () => {
     }
   });
 
-  it("Request Random Reward (authorized admin)", async () => {
+  it.only("Request Random Reward (authorized admin)", async () => {
     const clientSeed = Math.floor(Math.random() * 256);
 
     let tx = await ephemeralProgram.methods
@@ -771,7 +771,7 @@ describe.only("rewards-delegated-vrf", () => {
     }
   });
 
-  it.only("Add NFT Mint to Silver Prize Reward (on Ephemeral Rollup)", async () => {
+  it("Add NFT Mint to Silver Prize Reward (on Ephemeral Rollup)", async () => {
     console.log("\n=== Adding NFT Mint to Silver Prize Reward ===");
     try {
       // Load NFT mints from file
@@ -849,7 +849,7 @@ describe.only("rewards-delegated-vrf", () => {
     }
   });
 
-  it.only("Add Token Reward to Bronze Prize with SPL Token", async () => {
+  it("Add Token Reward to Bronze Prize with SPL Token", async () => {
     logSection("Adding SPL Token to Bronze Prize Reward");
     try {
 
