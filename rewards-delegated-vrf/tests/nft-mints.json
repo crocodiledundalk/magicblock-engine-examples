@@ -72,6 +72,24 @@
       "name": "Reward NFT #1",
       "distributorTokenAccount": "J58tEFqy6F7vprxdPW2Qg7rfizsXWbXncvCLvmALtxTH",
       "metadataAddress": "7bAqodncdVbuU4qLqpqE2kJiZG6SaGmSJk7Ui4NVkAN4"
+    },
+    {
+      "mint": "8Y2T22Rn1DSK8MsZc54oTEVc7C3cVQ3XDbwHwgRnsbDg",
+      "name": "Reward NFT #1",
+      "distributorTokenAccount": "EgCDQAFmwLGfvZQirHGdSJu8LbAMkgmjNHTG6YBBMh61",
+      "metadataAddress": "Dow1cLFHkwTYSMFdw7QnYcEWLAAAUo5e3bGdCUwa3mHK"
+    },
+    {
+      "mint": "5AcZAwnM2Wupkwbd1LR1uexPRx6cAvtHjZkXz5vn24gY",
+      "name": "Reward NFT #1",
+      "distributorTokenAccount": "DmNLHvbZAFdxrBwfNR11KSmjC359H37PQefoNLLbdnxM",
+      "metadataAddress": "3mENhD5Zxacwi5BGzHvmF7fvPh9oznPsatu5Xbp8jQLW"
+    },
+    {
+      "mint": "AbVusReaxDeuYb1ShmZGR77jgQvxV4zoqRGY4dXVTiyL",
+      "name": "Reward NFT #1",
+      "distributorTokenAccount": "2ovtumRGiKY5tv1K9rGdsKsxXzv8QBLG8AwRpTjUyahQ",
+      "metadataAddress": "4RFyy4L5WANPwwn1G2tsAcvoKDXHYfYN2EYHAp43rg8n"
     }
   ]
 }

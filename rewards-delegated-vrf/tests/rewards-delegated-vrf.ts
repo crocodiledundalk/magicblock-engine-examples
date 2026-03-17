@@ -463,7 +463,7 @@ describe.only("rewards-delegated-vrf", () => {
     }
   });
 
-  it("Set Reward List with rewards", async () => {
+it("Set Reward List with rewards", async () => {
     const rewards: any[] = [
       {
         name: "Gold Prize",
@@ -626,7 +626,7 @@ describe.only("rewards-delegated-vrf", () => {
           rewardDistributor: rewardDistributorPda,
           rewardList: rewardListPda,
         })
-        .signers([user, user])
+        .signers([user])
         .rpc({ skipPreflight: true })
         .catch((err) => {
           console.log("Expected error - unauthorized admin:", err.message);
@@ -641,7 +641,7 @@ describe.only("rewards-delegated-vrf", () => {
     }
   });
 
-  it.only("Request Random Reward (authorized admin)", async () => {
+  it("Request Random Reward (authorized admin)", async () => {
     const clientSeed = Math.floor(Math.random() * 256);
 
     let tx = await ephemeralProgram.methods
@@ -658,11 +658,9 @@ describe.only("rewards-delegated-vrf", () => {
     tx.recentBlockhash = (
       await providerEphemeralRollup.connection.getLatestBlockhash()
     ).blockhash;
-    tx.partialSign(wallet.payer);
-    tx.partialSign(user);
 
     const txHash = await providerEphemeralRollup
-      .sendAndConfirm(tx, [wallet.payer, user], { skipPreflight: true })
+      .sendAndConfirm(tx, [wallet.payer], { skipPreflight: true })
       .catch((err) => {
         console.log(
           "Request Random Reward error (may fail if VRF not available):",

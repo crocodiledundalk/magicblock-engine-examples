@@ -28,7 +28,7 @@ use helpers::validate_reward;
 use state::{Reward, RewardDistributor, RewardType, RewardsList, TransferLookupTable};
 use token_detection::detect_reward_type;
 
-declare_id!("6e7VampziFfZf3nDB5pA3QhQKB8xmCQuJxFh7oLgSUjg");
+declare_id!("rEwArDea6BfpdA8QuBLkTCLESRJfZciUFoHA68FRq6Y");
 
 #[ephemeral]
 #[program]
@@ -218,6 +218,18 @@ pub mod rewards_delegated_vrf {
             let result = reward_list.global_range_min + (rnd_u32 % range as u32);
             msg!("Random result: {:?} for user: {:?}", result, user.key());
 
+            // Print Rewards
+            for reward in reward_list.rewards.iter() {
+                msg!(
+                    "Reward: {:?} | Win Range: [{:?}, {:?}] | Availability: {:?}/{:?}",
+                    reward.name,
+                    reward.draw_range_min,
+                    reward.draw_range_max,
+                    reward.redemption_count,
+                    reward.redemption_limit
+                );
+            }
+
             let mut found_reward = false;
             for reward in reward_list.rewards.iter_mut() {
                 if result >= reward.draw_range_min && result <= reward.draw_range_max {
@@ -233,11 +245,6 @@ pub mod rewards_delegated_vrf {
 
                         // Use the lookup accounts directly
                         if !transfer_lookup_table.lookup_accounts.is_empty() {
-                            msg!("Transfer Lookup Accounts for {:?}:", reward.reward_type);
-                            msg!(
-                                "Account count: {}",
-                                transfer_lookup_table.lookup_accounts.len()
-                            );
                             for (index, account) in
                                 transfer_lookup_table.lookup_accounts.iter().enumerate()
                             {
