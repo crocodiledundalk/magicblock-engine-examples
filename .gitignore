@@ -17,6 +17,9 @@
 !**/anchor-minter/target/idl/
 !**/anchor-counter/target/idl/
 !**/anchor-minter/target/deploy/
+!**/ephemeral-account-chats/target/idl/
+!**/ephemeral-account-chats/target/types/
+!**/ephemeral-account-chats/target/deploy/*.json
 
 # 
 **/tests-kit
