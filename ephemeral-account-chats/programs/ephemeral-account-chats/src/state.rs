@@ -30,7 +30,7 @@ pub struct Conversation {
 }
 
 impl Conversation {
-    pub const BASE_SPACE: usize = 32 + 32 + 1 + 4 + MAX_HANDLE_LEN * 2;
+    pub const BASE_SPACE: usize = 1 + 3 * 4 + MAX_HANDLE_LEN * 2;
 
     pub fn space_for_message_count(message_count: usize) -> usize {
         Self::BASE_SPACE + (message_count * ConversationMessage::INIT_SPACE)
