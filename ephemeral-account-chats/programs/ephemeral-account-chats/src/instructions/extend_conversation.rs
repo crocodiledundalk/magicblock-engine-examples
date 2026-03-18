@@ -10,12 +10,10 @@ pub fn extend_conversation(
 ) -> Result<()> {
     require!(additional_messages > 0, ChatError::InvalidExtensionSize);
 
-    let conversation = {
-        let data = ctx.accounts.conversation.try_borrow_data()?;
-        Conversation::try_deserialize(&mut &data[..])?
-    };
+    let current_message_capacity =
+        Conversation::message_capacity(ctx.accounts.conversation.to_account_info().data_len());
 
-    let new_message_capacity = conversation.messages.len() + additional_messages as usize;
+    let new_message_capacity = current_message_capacity + additional_messages as usize;
     ctx.accounts.resize_ephemeral_conversation(
         (8 + Conversation::space_for_message_count(new_message_capacity)) as u32,
     )?;

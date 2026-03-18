@@ -35,4 +35,8 @@ impl Conversation {
     pub fn space_for_message_count(message_count: usize) -> usize {
         Self::BASE_SPACE + (message_count * ConversationMessage::INIT_SPACE)
     }
+
+    pub fn message_capacity(data_len: usize) -> usize {
+        (data_len - 8 - Self::BASE_SPACE) / ConversationMessage::INIT_SPACE
+    }
 }
