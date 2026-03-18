@@ -1075,7 +1075,7 @@ pub struct RemoveReward<'info> {
 #[vrf]
 #[derive(Accounts)]
 pub struct RequestRandomReward<'info> {
-    pub user: Signer<'info>,
+    pub user: AccountInfo<'info>,
     #[account(constraint = admin.key() == reward_distributor.super_admin || reward_distributor.admins.contains(&admin.key()) || reward_distributor.whitelist.contains(&admin.key()))]
     pub admin: Signer<'info>,
     pub reward_distributor: Account<'info, RewardDistributor>,
