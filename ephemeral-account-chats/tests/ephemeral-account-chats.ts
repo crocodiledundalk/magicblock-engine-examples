@@ -18,7 +18,7 @@ function generateName(): string {
 }
 
 function conversationSize(messageCount: number): number {
-  return 8 + 32 + 32 + 1 + 4 + 2 * 32 + messageCount * 324;
+  return 8 + 1 + 3 * 4 + 2 * 32 + messageCount * 324;
 }
 
 const MAX_MESSAGE_COUNT = 5;
@@ -81,16 +81,19 @@ describe("ephemeral-account-chats", () => {
     tx.feePayer = userA.publicKey;
     tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
     const signedTx = await userA.signTransaction(tx);
-    await connection.sendRawTransaction(signedTx.serialize());
+    const txHash = await connection.sendRawTransaction(signedTx.serialize());
+    await connection.confirmTransaction(txHash, "confirmed");
 
-    const response = await fetch(erRpcUrl, {method: "POST", body: JSON.stringify({
-      "method": "getIdentity",
-      "jsonrpc": "2.0",
-      "params": [{
-        "commitment": "confirmed"
-      }],
-      "id": "c1cae191-92ec-4606-880c-c7817afaa121"
-    })});
+    const response = await fetch(erRpcUrl, {
+      method: "POST", body: JSON.stringify({
+        "method": "getIdentity",
+        "jsonrpc": "2.0",
+        "params": [{
+          "commitment": "confirmed"
+        }],
+        "id": "c1cae191-92ec-4606-880c-c7817afaa121"
+      })
+    });
     const data: any = await response.json();
     validator = new PublicKey(data.result.identity);
 
@@ -103,29 +106,29 @@ describe("ephemeral-account-chats", () => {
   });
 
   it("creates profiles", async () => {
-      await program.methods
-        .createProfile(nameA)
-        .accountsPartial({
-          authority: userA.publicKey,
-          profile: profileAPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+    await program.methods
+      .createProfile(nameA)
+      .accountsPartial({
+        authority: userA.publicKey,
+        profile: profileAPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
 
-      await program.methods
-        .createProfile(nameB)
-        .accountsPartial({
-          authority: userB.publicKey,
-          profile: profileBPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .signers([userBKp])
-        .rpc();
+    await program.methods
+      .createProfile(nameB)
+      .accountsPartial({
+        authority: userB.publicKey,
+        profile: profileBPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([userBKp])
+      .rpc();
 
-      const profileA = await program.account.profile.fetch(profileAPda);
-      const profileB = await program.account.profile.fetch(profileBPda);
-      expect(profileA.handle).to.equal(nameA);
-      expect(profileB.handle).to.equal(nameB);
+    const profileA = await program.account.profile.fetch(profileAPda);
+    const profileB = await program.account.profile.fetch(profileBPda);
+    expect(profileA.handle).to.equal(nameA);
+    expect(profileB.handle).to.equal(nameB);
   });
 
   it("tops up profiles", async () => {
@@ -187,7 +190,7 @@ describe("ephemeral-account-chats", () => {
 
     const conversation = await erProgramA.account.conversation.fetch(conversationPda);
     expect(conversation.messages.length).to.equal(0);
-    const conversationAccount  = await erConnection.getAccountInfo(conversationPda);
+    const conversationAccount = await erConnection.getAccountInfo(conversationPda);
     expect(conversationAccount?.data.length).to.equal(conversationSize(0));
   });
 
@@ -214,8 +217,8 @@ describe("ephemeral-account-chats", () => {
 
     const nMessages = MAX_MESSAGE_COUNT;
     try {
-      for (let i = 0; i < nMessages; i++) { 
-        if (i%2 === 0) {
+      for (let i = 0; i < nMessages; i++) {
+        if (i % 2 === 0) {
           await erProgramA.methods
             .appendMessage("Hello, world from user A!")
             .accountsPartial({
@@ -234,7 +237,7 @@ describe("ephemeral-account-chats", () => {
             })
             .signers([userBKp])
             .rpc();
-          }
+        }
       }
 
       const retries = 10;
@@ -273,7 +276,7 @@ describe("ephemeral-account-chats", () => {
       .accounts({
         authority: userA.publicKey,
         profileOwner: profileAPda,
-        profileOther: profileBPda,  
+        profileOther: profileBPda,
         conversation: conversationPda,
       })
       .rpc();
@@ -300,7 +303,7 @@ describe("ephemeral-account-chats", () => {
 
     await connection.getTransaction(commitmentSignatureA, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
     await connection.getTransaction(commitmentSignatureB, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-    
+
     const profileA = await connection.getAccountInfo(profileAPda);
     const profileB = await connection.getAccountInfo(profileBPda);
     expect(profileA?.owner?.toBase58()).to.equal(program.programId.toBase58());
