@@ -266,7 +266,8 @@ describe("ephemeral-account-chats", () => {
       assert.fail("The conversation should have been full");
     } catch (error) {
       let programError = error as anchor.ProgramError;
-      expect(programError.msg).to.equal(program.idl.errors[6].msg);
+      const expectedError = program.idl.errors.find(e => e.name === "conversationCapacityExceeded");
+      expect(programError.msg).to.equal(expectedError?.msg);
     }
   });
 
@@ -333,8 +334,8 @@ describe("ephemeral-account-chats", () => {
 
     const profileA = await connection.getAccountInfo(profileAPda);
     const profileB = await connection.getAccountInfo(profileBPda);
-    expect(profileA?.owner).to.undefined;
-    expect(profileB?.owner).to.undefined;
+    expect(profileA?.owner).to.be.undefined;
+    expect(profileB?.owner).to.be.undefined;
 
     const userBBalance = await connection.getBalance(userB.publicKey);
     const tx = new Transaction().add(
@@ -347,6 +348,7 @@ describe("ephemeral-account-chats", () => {
     tx.feePayer = userB.publicKey;
     tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
     const signedTx = await userB.signTransaction(tx);
-    await connection.sendRawTransaction(signedTx.serialize());
+    const txHash = await connection.sendRawTransaction(signedTx.serialize());
+    await connection.confirmTransaction(txHash, "confirmed");
   });
 });
