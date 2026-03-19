@@ -26,3 +26,7 @@
 
 # Logs
 **/**/**.log
+
+# Local validator runtime data
+magicblock-test-storage/
+my-ledger/
