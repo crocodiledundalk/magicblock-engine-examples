@@ -1,0 +1,22 @@
+{
+  "name": "anchor-counter-litesvm",
+  "version": "0.1.0",
+  "description": "Anchor counter example tests rewritten using the LiteSVM dual-harness",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "0.32.1",
+    "@magicblock-labs/litesvm-test-harness": "file:../packages/litesvm-test-harness",
+    "@solana/web3.js": "^1.98.2",
+    "litesvm": "^0.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "license": "MIT"
+}

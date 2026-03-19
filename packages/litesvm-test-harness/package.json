@@ -1,0 +1,45 @@
+{
+  "name": "@magicblock-labs/litesvm-test-harness",
+  "version": "0.1.0",
+  "description": "In-process LiteSVM test harness for MagicBlock Ephemeral Rollup flows",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "solana",
+    "anchor",
+    "magicblock",
+    "ephemeral-rollup",
+    "litesvm",
+    "testing"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "litesvm": "^0.6.0"
+  },
+  "peerDependencies": {
+    "@solana/web3.js": "^1.98.0"
+  },
+  "devDependencies": {
+    "@solana/web3.js": "^1.98.2",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
