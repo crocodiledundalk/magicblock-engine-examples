@@ -26,7 +26,7 @@ solana-system-interface = { version = "2.0.0", features = ["bincode"] }
 
 [lib]
 name = "pinocchio_counter"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [[test]]
 name = "delegate_counter"
