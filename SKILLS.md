@@ -270,6 +270,67 @@ yarn test
 
 ---
 
+## Fixtures and `[[test.genesis]]` in Anchor.toml
+
+Several examples declare programs and accounts to pre-load via `[[test.genesis]]` blocks:
+
+```toml
+[[test.genesis]]
+address = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+program = "tests/fixtures/dlp.so"
+upgradeable = false
+
+[[test.genesis]]
+address = "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2"
+program = "tests/fixtures/ephemeral_token_program.so"
+upgradeable = false
+
+[[test.validator.account]]
+address = "EHLkWwAT9oebVv9ht3mtqrvHhRVMKrt54tF3MfHTey2K"
+filename = "tests/fixtures/registry.json"
+```
+
+### GOTCHA 14: `[[test.genesis]]` is only used by `anchor test`'s built-in validator
+
+These declarations are consumed by the Anchor CLI when it starts its own local validator
+(i.e. `anchor test` without `--skip-local-validator`). When you run with pre-started
+validators (the `fullstack-test.sh` / skip approach), these sections are **ignored entirely**.
+
+You are responsible for ensuring the same programs are loaded in your validator startup.
+Use the `--bpf-program` and `--account` flags as shown in Step 1, loading from the
+official dumps in the `ephemeral-validator` npm package.
+
+### GOTCHA 15: fixture files in `tests/fixtures/` may be stale or missing
+
+The `.so` files checked into `tests/fixtures/` are independent copies that may differ
+from the current versions in the official validator dumps:
+
+```
+# Example: spl-tokens dlp.so differs from the dump
+md5: tests/fixtures/dlp.so                   ≠   local-dumps/DELeGG...so
+md5: tests/fixtures/ephemeral_token_program.so ≠   local-dumps/SPLxh1...so
+```
+
+Always prefer loading from the `local-dumps` directory. For `dummy-token-transfer`, the
+`tests/fixtures/` directory is declared in `Anchor.toml` but does not exist at all —
+only the skip-validator approach works.
+
+### GOTCHA 16: `[test.validator] url = "devnet"` means clone-from-devnet mode
+
+Some examples (e.g. `bolt-counter`) set:
+
+```toml
+[test.validator]
+url = "devnet"
+rpc_port = 8899
+```
+
+This tells `anchor test` to clone all declared programs from devnet before running.
+It has no effect when using pre-started validators. Load the equivalent programs
+from local dumps instead.
+
+---
+
 ## Example-Specific Gotchas
 
 ### GOTCHA 6: oncurve-delegation — delegating the main fee-payer wallet poisons state
