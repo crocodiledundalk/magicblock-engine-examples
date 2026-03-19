@@ -14,3 +14,6 @@ ephemeral-rollups-sdk = "0.6.5"
 [lib]
 name = "rust_counter"
 crate-type = ["cdylib", "lib"]
+
+[dev-dependencies]
+borsh = "1.5.7"
