@@ -52,7 +52,7 @@ export async function initializeFeePayer(connection: Connection, userKeypair: Cr
         const publicKeyBytes = new Uint8Array(await crypto.subtle.exportKey('raw', publicKey));
         const keypairBytes = new Uint8Array([...privateKeyBytes, ...publicKeyBytes]);
         // Append the new key-value pair to the contents of the .env file
-        let envContent = fs.readFileSync('.env', 'utf-8')
+        let envContent = fs.existsSync('.env') ? fs.readFileSync('.env', 'utf-8') : ''
         envContent += `FEE_PAYER_PRIVATE_KEY=${JSON.stringify(Array.from(keypairBytes))}\n`
         fs.writeFileSync('.env', envContent);
 

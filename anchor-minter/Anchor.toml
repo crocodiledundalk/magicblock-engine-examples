@@ -7,11 +7,11 @@ skip-lint = false
 
 [programs.devnet]
 anchor_counter = "852a53jomx7dGmkpbFPGXNJymRxywo3WsH1vusNASJRr"
-token-minter = "HfPTAU1bZBHPqcpEGweinAH9zsPafYnnaxk4k5xsTU3M"
+token-minter = "DSRodKj1gdLyUJ14gymWeciZiQdT3zH1SN7LWqSHxoqT"
 
 [programs.localnet]
 anchor_counter = "852a53jomx7dGmkpbFPGXNJymRxywo3WsH1vusNASJRr"
-token-minter = "HfPTAU1bZBHPqcpEGweinAH9zsPafYnnaxk4k5xsTU3M"
+token-minter = "DSRodKj1gdLyUJ14gymWeciZiQdT3zH1SN7LWqSHxoqT"
 
 
 [registry]

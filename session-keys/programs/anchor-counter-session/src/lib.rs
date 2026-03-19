@@ -5,7 +5,7 @@ use ephemeral_rollups_sdk::ephem::{commit_accounts, commit_and_undelegate_accoun
 
 use session_keys::{session_auth_or, Session, SessionError, SessionToken};
 
-declare_id!("6nMudTUrvXh1NGDyJYHPozJRmmHxB3s9Mjp2pSQqZiZ9");
+declare_id!("4aKBdeF93xKdfRizpCxFJFPT68p7tXdJjkPUDhon539c");
 
 const COUNTER_SEED: &[u8] = b"counter";
 

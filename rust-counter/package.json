@@ -16,7 +16,8 @@
     "fs": "0.0.2"
   },
   "scripts": {
-    "test": "npx vitest run ./tests/kit",
+    "test": "npx vitest run ./tests/kit/rust-counter.test.ts",
+    "test-advanced": "npx vitest run ./tests/kit",
     "test-web3js": "npx vitest run ./tests/web3js"
   },
   "devDependencies": {

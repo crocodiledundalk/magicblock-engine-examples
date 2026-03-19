@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-spl-tokens = "FgvEeit1djLPPjozq9zW9R8Ahu5JpijcdWQxqL4P887"
+spl-tokens = "4tsXYHp1mTKcRDaYWxUnx4PUYQCYVJvLqBtKbiBZUaES"
 
 [programs.localnet]
-spl-tokens = "FgvEeit1djLPPjozq9zW9R8Ahu5JpijcdWQxqL4P887"
+spl-tokens = "4tsXYHp1mTKcRDaYWxUnx4PUYQCYVJvLqBtKbiBZUaES"
 
 
 [registry]
