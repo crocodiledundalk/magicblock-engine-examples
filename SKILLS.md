@@ -272,52 +272,90 @@ yarn test
 
 ## Fixtures and `[[test.genesis]]` in Anchor.toml
 
-Several examples declare programs and accounts to pre-load via `[[test.genesis]]` blocks:
+### What the declarations mean
+
+Several examples declare additional programs and accounts in their `Anchor.toml`:
 
 ```toml
+# A program to load into the genesis block
 [[test.genesis]]
 address = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 program = "tests/fixtures/dlp.so"
 upgradeable = false
 
+# Another program
 [[test.genesis]]
 address = "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2"
 program = "tests/fixtures/ephemeral_token_program.so"
 upgradeable = false
 
+# A pre-populated account (not a program)
 [[test.validator.account]]
 address = "EHLkWwAT9oebVv9ht3mtqrvHhRVMKrt54tF3MfHTey2K"
 filename = "tests/fixtures/registry.json"
 ```
 
-### GOTCHA 14: `[[test.genesis]]` is only used by `anchor test`'s built-in validator
+### GOTCHA 14: `[[test.genesis]]` is only processed by `anchor test`'s built-in validator
 
-These declarations are consumed by the Anchor CLI when it starts its own local validator
-(i.e. `anchor test` without `--skip-local-validator`). When you run with pre-started
-validators (the `fullstack-test.sh` / skip approach), these sections are **ignored entirely**.
+These declarations are consumed by the Anchor CLI **only when it starts its own local
+validator** (i.e. `anchor test` without `--skip-local-validator`). When you start
+validators yourself and pass `--skip-local-validator`, Anchor never reads these sections.
 
-You are responsible for ensuring the same programs are loaded in your validator startup.
-Use the `--bpf-program` and `--account` flags as shown in Step 1, loading from the
-official dumps in the `ephemeral-validator` npm package.
+**You must manually replicate every `[[test.genesis]]` and `[[test.validator.account]]`
+entry as flags to `solana-test-validator`.**
 
-### GOTCHA 15: fixture files in `tests/fixtures/` may be stale or missing
+### How to translate declarations to validator flags
 
-The `.so` files checked into `tests/fixtures/` are independent copies that may differ
-from the current versions in the official validator dumps:
+The mapping is direct:
 
+| Anchor.toml declaration | `solana-test-validator` flag |
+|------------------------|------------------------------|
+| `[[test.genesis]]` with `upgradeable = false` | `--bpf-program <address> <path.so>` |
+| `[[test.genesis]]` with `upgradeable = true` | `--upgradeable-program <address> <path.so> <authority-keypair>` |
+| `[[test.validator.account]]` | `--account <address> <path.json>` |
+| `[test.validator] url = "devnet"` | Clone programs from devnet using `--clone <address> --url devnet` |
+
+For `bolt-counter`, which needs a world program and a registry account not in the
+official dumps, the translation is:
+
+```bash
+solana-test-validator \
+  ... (standard MagicBlock flags) ... \
+  --bpf-program WorLD15A7CrDwLcLy4fRqtaTb9fbd8o8iqiEMUDse2n tests/fixtures/world.so \
+  --bpf-program DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh "$DUMPS/DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh.so" \
+  --account EHLkWwAT9oebVv9ht3mtqrvHhRVMKrt54tF3MfHTey2K tests/fixtures/registry.json
 ```
-# Example: spl-tokens dlp.so differs from the dump
-md5: tests/fixtures/dlp.so                   ≠   local-dumps/DELeGG...so
-md5: tests/fixtures/ephemeral_token_program.so ≠   local-dumps/SPLxh1...so
+
+### GOTCHA 15: which file to use — fixture vs official dump
+
+There are two sources for the same program. They often differ (different build hashes):
+
+| Program address | In `local-dumps/`? | In `tests/fixtures/`? | Which to use |
+|----------------|-------------------|----------------------|--------------|
+| `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh` (delegation) | **Yes** | Yes (stale, 3 different versions across examples) | **Use `local-dumps/`** |
+| `SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2` (ephemeral token) | **Yes** | Yes (stale) | **Use `local-dumps/`** |
+| `WorLD15A7CrDwLcLy4fRqtaTb9fbd8o8iqiEMUDse2n` (BOLT world) | No | **Yes** (`bolt-counter/tests/fixtures/world.so`) | **Use fixture** |
+| `EHLkWwAT9oebVv9ht3mtqrvHhRVMKrt54tF3MfHTey2K` (BOLT registry) | No | **Yes** (`bolt-counter/tests/fixtures/registry.json`) | **Use fixture** |
+
+**Rule**: if the address has a file in `local-dumps/`, use that. If not, use the fixture.
+If neither exists, the test cannot run without network access to clone from devnet/mainnet.
+
+The `local-dumps` directory is:
+```
+/opt/node22/lib/node_modules/@magicblock-labs/ephemeral-validator/bin/local-dumps/
 ```
 
-Always prefer loading from the `local-dumps` directory. For `dummy-token-transfer`, the
-`tests/fixtures/` directory is declared in `Anchor.toml` but does not exist at all —
-only the skip-validator approach works.
+### GOTCHA 16: `tests/fixtures/` may not exist even when declared
 
-### GOTCHA 16: `[test.validator] url = "devnet"` means clone-from-devnet mode
+`dummy-token-transfer` declares `tests/fixtures/dlp.so` in its `Anchor.toml`, but the
+`tests/fixtures/` directory does not exist on disk. This has no consequence when using
+the skip-validator approach (since `[[test.genesis]]` is ignored), but `anchor test`
+would fail to start. Load `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh` from the
+official dump instead.
 
-Some examples (e.g. `bolt-counter`) set:
+### GOTCHA 17: `[test.validator] url = "devnet"` — clone mode
+
+Some examples (`bolt-counter`) declare:
 
 ```toml
 [test.validator]
@@ -325,9 +363,10 @@ url = "devnet"
 rpc_port = 8899
 ```
 
-This tells `anchor test` to clone all declared programs from devnet before running.
-It has no effect when using pre-started validators. Load the equivalent programs
-from local dumps instead.
+This tells `anchor test` to pull programs from devnet at startup. It has no effect when
+using pre-started validators. With internet access you can replicate it by adding
+`--clone <address> --url https://api.devnet.solana.com` to `solana-test-validator`.
+Without internet access, use the fixture files directly.
 
 ---
 
