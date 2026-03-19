@@ -73,6 +73,13 @@ export interface HarnessConfig {
     refreshUndelegatedAccountsEveryTx?: boolean;
     /** When true, programs are re-checked before every ER transaction. */
     refreshProgramsEveryTx?: boolean;
+    /**
+     * When true, SPL Token, Token-2022, and associated token programs are loaded
+     * into both SVMs, along with the native mint accounts. Required for any
+     * program that CPIs into the SPL token program.
+     * Default: false.
+     */
+    splTokenSupport?: boolean;
 }
 /**
  * Result of executing a transaction through the harness.

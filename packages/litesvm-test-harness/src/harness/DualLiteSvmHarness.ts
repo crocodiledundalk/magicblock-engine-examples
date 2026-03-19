@@ -91,8 +91,16 @@ export class DualLiteSvmHarness {
     // Disable transaction history so that semantically-identical transactions
     // (same instruction, same accounts, same blockhash) can be sent repeatedly
     // without hitting duplicate-transaction errors.
-    this.base = new LiteSVM().withTransactionHistory(0n);
-    this.er = new LiteSVM().withTransactionHistory(0n);
+    const makeSvm = () => {
+      let svm = new LiteSVM().withTransactionHistory(0n);
+      if (config.splTokenSupport) {
+        svm = svm.withDefaultPrograms().withNativeMints();
+      }
+      return svm;
+    };
+
+    this.base = makeSvm();
+    this.er = makeSvm();
     this.meta = new MirrorMetaStore();
 
     this.config = {
@@ -104,6 +112,7 @@ export class DualLiteSvmHarness {
       refreshUndelegatedAccountsEveryTx:
         config.refreshUndelegatedAccountsEveryTx ?? true,
       refreshProgramsEveryTx: config.refreshProgramsEveryTx ?? false,
+      splTokenSupport: config.splTokenSupport ?? false,
     };
 
     this.cloner = new CloneCoordinator(
