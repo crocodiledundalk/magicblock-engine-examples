@@ -1,3 +1,14 @@
+---
+description: Agent reference for writing and debugging LiteSVM-based ephemeral rollup tests using @magicblock-labs/litesvm-test-harness. Use when creating, modifying, or troubleshooting in-process ER test suites in this repo.
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+---
+
 # @magicblock-labs/litesvm-test-harness — Agent Skills Reference
 
 This document is written for AI agents (Claude and others) working with or
@@ -138,7 +149,7 @@ true` currently has no effect beyond recording the config value.
 
 ---
 
-## Known failure modes for agents
+## Known failure modes
 
 ### 1. Forgetting to airdrop on both SVMs
 
@@ -198,7 +209,14 @@ const idl = JSON.parse(readFileSync(idlPath, "utf8")) as anchor.Idl;
 const counterPDA = new PublicKey("5RgeA5P8bRaynJovch3zQURfJxXL3QK2JYg1YamSvyLb");
 ```
 
-### 4. Duplicate transaction errors (rare, already mitigated)
+**Known mismatches in this repo:**
+
+| Source `declare_id!` | Actual binary ID (from keypair) |
+|---|---|
+| `9RPwaXay...` (anchor-counter/src) | `852a53jo...` (anchor-minter/target/deploy) |
+| `DSRodKj1...` (token-minter/src) | `DSRodKj1...` (matches) |
+
+### 4. Duplicate transaction errors (already mitigated)
 
 LiteSVM by default rejects transactions with the same signature as a previous
 one in its history. The harness constructor calls `.withTransactionHistory(0n)`
@@ -297,6 +315,58 @@ anchor.setProvider(provider);
 
 ---
 
+## Techniques used in this repo's test packages
+
+### Injecting SPL Token accounts via setAccount
+
+`create_token` in `token_minter` CPIs to the Metaplex metadata program, which
+has no available binary. Without a mint account, `mint_token` cannot be tested.
+
+**Solution:** Manually craft the mint account data and inject it:
+
+```typescript
+function buildMintData(mintAuthority: PublicKey, decimals: number): Uint8Array {
+  const buf = Buffer.alloc(82, 0);
+  buf.writeUInt32LE(1, 0);
+  mintAuthority.toBuffer().copy(buf, 4);
+  buf.writeBigUInt64LE(0n, 36);
+  buf.writeUInt8(decimals, 44);
+  buf.writeUInt8(1, 45);
+  buf.writeUInt32LE(0, 46);
+  return new Uint8Array(buf);
+}
+```
+
+### Anchor discriminators without an IDL file
+
+```typescript
+import { createHash } from "crypto";
+
+function anchorDiscriminator(name: string): Buffer {
+  return Buffer.from(
+    createHash("sha256").update(`global:${name}`).digest()
+  ).slice(0, 8);
+}
+```
+
+### Native Rust tests without solana-program-test
+
+`solana-program-test` (3.0.x) has an internal compile error when paired with
+`solana-program = "2.2.1"`. For Rust programs, write in-process unit tests that
+call the processor function directly with mock `AccountInfo` objects:
+
+```rust
+let counter_info = AccountInfo::new(
+    &counter_pda, false, true,
+    &mut lamports, &mut data,
+    &program_id, false, Epoch::default(),
+);
+process_increase_counter(&program_id, &accounts, 5).unwrap();
+assert_eq!(Counter::try_from_slice(&accounts[1].data.borrow()).unwrap().count, 5);
+```
+
+---
+
 ## Account state machine
 
 ```yaml
@@ -319,7 +389,7 @@ authoritative_layer:
 
 ---
 
-## Clone policy (what gets copied into ER and when)
+## Clone policy
 
 ```yaml
 clone_policy:
@@ -343,9 +413,6 @@ clone_policy:
 
 ## PDA helpers
 
-The package exports all six DLP PDA derivation functions. These match the seed
-schemes used by the real delegation program:
-
 ```yaml
 pda_seeds:
   delegationRecordPda:   ["delegation",          delegatedAccount]
@@ -357,18 +424,14 @@ pda_seeds:
   all_program:           "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 ```
 
-**Important:** The harness PDA byte layouts (`encodeDelegationRecord`,
-`encodeDelegationMetadata`) use a simplified internal format with a placeholder
-discriminator (`0xdeadbeefcafebabe`). They do **not** match real on-chain Anchor
-discriminators. The `StateMirrorBackend` reads state from `MirrorMetaStore`
-(not from decoded PDA bytes), so this does not matter for most tests.
+**Important:** The harness PDA byte layouts use a simplified internal format
+with a placeholder discriminator (`0xdeadbeefcafebabe`). They do **not** match
+real on-chain Anchor discriminators. The `StateMirrorBackend` reads state from
+`MirrorMetaStore`, so this does not matter for most tests.
 
 ---
 
 ## readCounterValue helper
-
-A convenience function for reading the count field from an Anchor-serialised
-`Counter` account (layout: `[8-byte discriminator][u64 LE count]`):
 
 ```typescript
 import { readCounterValue } from "@magicblock-labs/litesvm-test-harness";
@@ -376,8 +439,7 @@ const account = harness.base.getAccount(counterPDA);
 const count = readCounterValue(account.data); // returns bigint
 ```
 
-This is included as a utility for the anchor-counter examples. For other
-account layouts, decode the buffer directly.
+Layout: `[8-byte Anchor discriminator][u64 LE count]`
 
 ---
 
@@ -388,9 +450,17 @@ not_included:
   - Magic Program binary (Magic11111111111111111111111111111111111111)
   - Delegation program binary (DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh)
   - Metaplex token metadata program
-  - ProtocolReplayBackend implementation (strictProtocolReplay: true is a no-op)
+  - ProtocolReplayBackend (strictProtocolReplay: true is a no-op)
   - warpToSlot / sysvar helpers (use harness.base.warpToSlot() directly)
 ```
+
+### Programs not covered (require live validator or unavailable binaries)
+
+`session-keys`, `crank-counter`, `magic-actions`, `anchor-rock-paper-scissor`,
+`ephemeral-account-chats`, `dummy-token-transfer`, `private-payments`,
+`bolt-counter` (needs `world.so`), `roll-dice` (needs VRF oracle),
+`pinocchio-counter` / `pinocchio-secret-counter` (pre-existing build failure —
+`target/deploy/pinocchio_counter.so` does not exist).
 
 ---
 
