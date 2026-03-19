@@ -3,10 +3,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-token-minter = "HfPTAU1bZBHPqcpEGweinAH9zsPafYnnaxk4k5xsTU3M"
+anchor-counter-session = "4aKBdeF93xKdfRizpCxFJFPT68p7tXdJjkPUDhon539c"
 
 [programs.localnet]
-token-minter = "HfPTAU1bZBHPqcpEGweinAH9zsPafYnnaxk4k5xsTU3M"
+anchor-counter-session = "4aKBdeF93xKdfRizpCxFJFPT68p7tXdJjkPUDhon539c"
 
 
 [registry]

@@ -2,11 +2,14 @@
 resolution = true
 skip-lint = false
 
+[programs.localnet]
+anchor-rock-paper-scissor = "EQ8yAhWCCVLQSqHaeC9JUrDQ5HxCbULsng8zAC7JGBRp"
+
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
