@@ -303,9 +303,15 @@ was not accessible (403). Skipped.
 
 ### pinocchio-counter / pinocchio-secret-counter
 These programs use the `pinocchio` crate which has `crate-type = ["cdylib"]`
-only (no `"lib"`) and uses incompatible types (`pinocchio::Address`,
-`AccountView`) that cannot bridge to `solana_program::Pubkey` / `AccountInfo`
-without a compatibility shim. No SBF binary is available. Skipped.
+only and uses incompatible types (`pinocchio::AccountInfo` vs
+`solana_program::AccountInfo`) that cannot bridge to `solana_program_test`'s
+`processor!` macro without a compatibility shim.
+
+The existing Rust tests in `pinocchio-counter/tests-rs/` use
+`ProgramTest::new("pinocchio_counter", PROGRAM_ID, None)` — the `None`
+processor flag requires a compiled BPF binary at
+`target/deploy/pinocchio_counter.so`, which does not exist. These tests have
+always failed in this repo (pre-existing failure, not introduced here).
 
 ### Programs not yet covered
 The following examples have TypeScript tests that require live validators
