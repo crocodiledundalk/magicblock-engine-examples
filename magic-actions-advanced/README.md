@@ -1,10 +1,23 @@
-# ✨ Magic Actions
+# ✨ Magic Actions Advanced
 
-Demonstrates using Magic Actions to execute automatic on-chain handlers when committing accounts from Ephemeral Rollups to the base layer.
+Combines two advanced magic-action patterns in one program:
+
+1. **Post-delegation actions** — an `increment` instruction is queued in the delegation payload and fired automatically by the ER validator when the counter account is first cloned. No separate increment transaction required.
+
+2. **PDA-paid magic action commits** — a protocol-owned `global_signer` PDA acts as the shared escrow authority, so the *protocol* pays the magic-action fee instead of the user's wallet.
+
+## Flow
+
+```
+initialize                    → create Counter (0) + Leaderboard (0) on base
+delegate                      → counter delegated to ER; post-delegation increment fires (counter = 1)
+increment (ER)                → explicit increment on ER (counter = 2)
+commitAndUpdateLeaderboard    → commit counter from ER; fire update_leaderboard on base
+                                via global_signer PDA escrow; leaderboard high score = 2
+undelegate                    → counter committed back to base; delegation ended
+```
 
 ## Software Packages
-
-This program has utilized the following software packages.
 
 | Software   | Version | Installation Guide                                              |
 | ---------- | ------- | --------------------------------------------------------------- |
