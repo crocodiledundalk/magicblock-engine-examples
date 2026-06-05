@@ -1,5 +1,4 @@
 use anchor_lang::prelude::*;
-use anchor_lang::Discriminator;
 use anchor_lang::solana_program::program::invoke_signed;
 use ephemeral_rollups_sdk::anchor::{action, commit, ephemeral};
 use ephemeral_rollups_sdk::cpi::{delegate_account_with_actions, DelegateAccounts, DelegateConfig};
@@ -173,9 +172,10 @@ pub mod magic_actions_advanced {
         }
         invoke_signed(&ix, &accounts, signer_seeds)?;
 
-        // Fire any AddActionCallback instructions (none expected here, but handle gracefully)
+        // Fire any AddActionCallback instructions (none expected here, but handle gracefully).
+        // These CPIs go to the magic program directly — global_signer is not a signer there.
         for (cb_accounts, cb_ix) in add_callback_ixs {
-            invoke_signed(&cb_ix, &cb_accounts, signer_seeds)?;
+            invoke_signed(&cb_ix, &cb_accounts, &[])?;
         }
 
         Ok(())
