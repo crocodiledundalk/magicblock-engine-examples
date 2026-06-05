@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-magic_actions_advanced = "PROGRAM_ID_PLACEHOLDER"
+magic_actions_advanced = "BnwZX1wrg7uj2qp5yX6nt6Uv6eCSoxvr7MNXCxYaS3Sf"
 
 [programs.localnet]
-magic_actions_advanced = "PROGRAM_ID_PLACEHOLDER"
+magic_actions_advanced = "BnwZX1wrg7uj2qp5yX6nt6Uv6eCSoxvr7MNXCxYaS3Sf"
 
 [registry]
 url = "https://api.apr.dev"
