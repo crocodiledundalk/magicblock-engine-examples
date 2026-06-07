@@ -10,7 +10,7 @@ use ephemeral_rollups_sdk::dlp_api::compact::AccountMeta as CompactAccountMeta;
 use ephemeral_rollups_sdk::ephem::{CallHandler, MagicIntentBundleBuilder};
 use ephemeral_rollups_sdk::{ActionArgs, ShortAccountMeta};
 
-declare_id!("BnwZX1wrg7uj2qp5yX6nt6Uv6eCSoxvr7MNXCxYaS3Sf");
+declare_id!("XXes2hMq31SeUnUCkAxuvSBx8DSDeKkv3mGN3Wbm8jJ");
 
 pub const COUNTER_SEED: &[u8] = b"counter";
 pub const LEADERBOARD_SEED: &[u8] = b"leaderboard";

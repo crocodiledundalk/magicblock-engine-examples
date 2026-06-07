@@ -4,6 +4,9 @@ set -o monitor
 # Suppress job control messages
 set +m
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PATH="$SCRIPT_DIR/node_modules/.bin:$PATH"
+
 SOLANA_PID=""
 EPHEMERAL_PID=""
 PASSED_TESTS=()
@@ -336,12 +339,13 @@ echo "Solana validator is ready, waiting for RPC to stabilize..."
 
 # Start MagicBlock Ephemeral Validator
 echo "Starting MagicBlock Ephemeral Validator..."
+rm -rf /tmp/mb-storage
 RUST_LOG=info ephemeral-validator \
-  --accounts-lifecycle ephemeral \
-  --remote-cluster development \
-  --remote-url http://localhost:8899 \
-  --remote-ws-url ws://localhost:8900 \
-  --rpc-port 7799 > ./ephemeral-validator.log 2>&1 &
+  --lifecycle ephemeral \
+  --remotes localhost \
+  -l 127.0.0.1:7799 \
+  --storage /tmp/mb-storage \
+  --reset > ./ephemeral-validator.log 2>&1 &
 
 EPHEMERAL_PID=$!
 
@@ -357,6 +361,8 @@ run_test "anchor-rock-paper-scissor" "cd anchor-rock-paper-scissor && anchor bui
 run_test "dummy-token-transfer" "cd dummy-token-transfer && anchor build && yarn install && anchor test --skip-build --skip-deploy --skip-local-validator; cd .."
 
 run_test "magic-actions" "cd magic-actions && yarn install && anchor build && anchor test --skip-build --skip-deploy --skip-local-validator; cd .."
+
+run_test "magic-actions-advanced" "cd magic-actions-advanced && yarn install && anchor build && solana program deploy --keypair ~/.config/solana/id.json --program-id target/deploy/magic_actions_advanced-keypair.json --url http://localhost:8899 target/deploy/magic_actions_advanced.so && ANCHOR_WALLET=~/.config/solana/id.json ANCHOR_PROVIDER_URL=http://localhost:8899 PROVIDER_ENDPOINT=http://localhost:8899 WS_ENDPOINT=ws://localhost:8900 ROUTER_ENDPOINT=http://localhost:7799 ROUTER_WS_ENDPOINT=ws://localhost:7800 yarn run ts-mocha -p ./tsconfig.json -t 300000 --exit tests/**/*.ts; cd .."
 
 run_test "oncurve-delegation" "cd oncurve-delegation && yarn install && EPHEMERAL_PROVIDER_ENDPOINT=http://localhost:7799 EPHEMERAL_WS_ENDPOINT=ws://localhost:7800 PROVIDER_ENDPOINT=http://localhost:8899 WS_ENDPOINT=http://localhost:8900 yarn test && EPHEMERAL_PROVIDER_ENDPOINT=http://localhost:7799 EPHEMERAL_WS_ENDPOINT=ws://localhost:7800 PROVIDER_ENDPOINT=http://localhost:8899 WS_ENDPOINT=http://localhost:8900 yarn test-web3js; cd .."
 
