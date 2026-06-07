@@ -15,6 +15,9 @@
 !/anchor-counter/target/deploy/*-keypair.json
 !/bolt-counter/target/deploy/counter-keypair.json
 !/bolt-counter/target/deploy/increase-keypair.json
+!/magic-actions-advanced/target/deploy/
+/magic-actions-advanced/target/deploy/*
+!/magic-actions-advanced/target/deploy/magic_actions_advanced-keypair.json
 
 # But don't ignore the target/idl/ directory
 !**/anchor-minter/target/idl/
